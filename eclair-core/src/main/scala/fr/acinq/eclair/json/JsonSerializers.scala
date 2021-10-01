@@ -17,8 +17,7 @@
 package fr.acinq.eclair.json
 
 import com.google.common.net.HostAndPort
-import fr.acinq.bitcoin.Crypto.{PrivateKey, PublicKey}
-import fr.acinq.bitcoin.{Btc, ByteVector32, ByteVector64, OutPoint, Satoshi, Transaction}
+import fr.acinq.bitcoin.{Btc, ByteVector32, ByteVector64, KeyPath, OutPoint, PrivateKey, PublicKey, Satoshi, Transaction}
 import fr.acinq.eclair.ApiTypes.ChannelIdentifier
 import fr.acinq.eclair.balance.CheckBalance.GlobalBalance
 import fr.acinq.eclair.blockchain.fee.FeeratePerKw
@@ -41,6 +40,7 @@ import scodec.bits.ByteVector
 
 import java.net.InetSocketAddress
 import java.util.UUID
+import scala.jdk.CollectionConverters.CollectionHasAsScala
 
 /**
  * Custom serializer that only does serialization, not deserialization.
@@ -215,6 +215,10 @@ class OutPointKeySerializer extends CustomKeySerializerOnly[OutPoint](_ => {
 
 class InputInfoSerializer extends CustomSerializerOnly[InputInfo](_ => {
   case x: InputInfo => JObject(("outPoint", JString(s"${x.outPoint.txid}:${x.outPoint.index}")), ("amountSatoshis", JInt(x.txOut.amount.toLong)))
+})
+
+class KeyPathSerializer extends CustomSerializerOnly[KeyPath](_ => {
+  case x: KeyPath => JObject(("path", JArray(x.path.asScala.toList.map(l => JLong(l)))))
 })
 
 class ColorSerializer extends CustomSerializerOnly[Color](_ => {
@@ -423,6 +427,7 @@ object JsonSerializers {
     new ChannelOpenResponseSerializer +
     new CommandResponseSerializer +
     new InputInfoSerializer +
+    new KeyPathSerializer +
     new ColorSerializer +
     new RouteResponseSerializer +
     new ThrowableSerializer +

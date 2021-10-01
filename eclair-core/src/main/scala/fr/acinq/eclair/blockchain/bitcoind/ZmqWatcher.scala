@@ -27,6 +27,7 @@ import fr.acinq.eclair.blockchain.watchdogs.BlockchainWatchdog
 import fr.acinq.eclair.tor.Socks5ProxyParams
 import fr.acinq.eclair.wire.protocol.ChannelAnnouncement
 import fr.acinq.eclair.{KamonExt, NodeParams, ShortChannelId}
+import fr.acinq.eclair.KotlinUtils._
 
 import java.util.concurrent.atomic.AtomicLong
 import scala.concurrent.duration._
@@ -178,8 +179,8 @@ object ZmqWatcher {
 
   private def utxo(w: GenericWatch): Option[OutPoint] = {
     w match {
-      case w: WatchSpent[_] => Some(OutPoint(w.txId.reverse, w.outputIndex))
-      case w: WatchSpentBasic[_] => Some(OutPoint(w.txId.reverse, w.outputIndex))
+      case w: WatchSpent[_] => Some(new OutPoint(w.txId.reversed(), w.outputIndex))
+      case w: WatchSpentBasic[_] => Some(new OutPoint(w.txId.reversed(), w.outputIndex))
       case _ => None
     }
   }

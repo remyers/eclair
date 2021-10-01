@@ -17,7 +17,7 @@
 package fr.acinq.eclair.db
 
 import akka.actor.{Actor, ActorLogging, Props}
-import fr.acinq.bitcoin.Crypto.PublicKey
+import fr.acinq.bitcoin.PublicKey
 import fr.acinq.bitcoin.{ByteVector32, Satoshi}
 import fr.acinq.eclair.NodeParams
 import fr.acinq.eclair.channel.Helpers.Closing._

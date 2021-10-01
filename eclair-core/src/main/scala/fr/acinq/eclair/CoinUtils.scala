@@ -17,9 +17,9 @@
 package fr.acinq.eclair
 
 import java.text.{DecimalFormat, NumberFormat}
-
-import fr.acinq.bitcoin.{Btc, BtcAmount, MilliBtc, Satoshi}
+import fr.acinq.bitcoin.{Btc, BtcAmount, MilliBtc, PimpSatoshi, Satoshi}
 import grizzled.slf4j.Logging
+import KotlinUtils._
 
 import scala.util.{Failure, Success, Try}
 
@@ -177,11 +177,11 @@ object CoinUtils extends Logging {
    */
   private def convertAmountToGUIUnit(amount: BtcAmount, unit: CoinUnit): BtcAmountGUILossless = (amount, unit) match {
     // amount is satoshi, convert sat -> msat
-    case (a: Satoshi, MSatUnit) => GUIMSat(a.toLong * SatUnit.factorToMsat)
-    case (a: Satoshi, SatUnit) => GUISat(a.toLong * SatUnit.factorToMsat)
-    case (a: Satoshi, BitUnit) => GUIBits(a.toLong * SatUnit.factorToMsat)
-    case (a: Satoshi, MBtcUnit) => GUIMBtc(a.toLong * SatUnit.factorToMsat)
-    case (a: Satoshi, BtcUnit) => GUIBtc(a.toLong * SatUnit.factorToMsat)
+    case (a: PimpSatoshi, MSatUnit) => GUIMSat(a.toLong * SatUnit.factorToMsat)
+    case (a: PimpSatoshi, SatUnit) => GUISat(a.toLong * SatUnit.factorToMsat)
+    case (a: PimpSatoshi, BitUnit) => GUIBits(a.toLong * SatUnit.factorToMsat)
+    case (a: PimpSatoshi, MBtcUnit) => GUIMBtc(a.toLong * SatUnit.factorToMsat)
+    case (a: PimpSatoshi, BtcUnit) => GUIBtc(a.toLong * SatUnit.factorToMsat)
 
     // amount is mbtc
     case (a: MilliBtc, MSatUnit) => GUIMSat((a.toBigDecimal * MBtcUnit.factorToMsat).toLong)

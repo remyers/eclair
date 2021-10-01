@@ -16,7 +16,7 @@
 
 package fr.acinq.eclair.db
 
-import fr.acinq.bitcoin.Crypto.PublicKey
+import fr.acinq.bitcoin.PublicKey
 import fr.acinq.bitcoin.{ByteVector32, Satoshi}
 import fr.acinq.eclair.channel._
 import fr.acinq.eclair.db.AuditDb.{NetworkFee, Stats}

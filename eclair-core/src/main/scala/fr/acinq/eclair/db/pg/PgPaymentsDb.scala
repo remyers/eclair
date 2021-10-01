@@ -17,7 +17,7 @@
 package fr.acinq.eclair.db.pg
 
 import fr.acinq.bitcoin.ByteVector32
-import fr.acinq.bitcoin.Crypto.PublicKey
+import fr.acinq.bitcoin.PublicKey
 import fr.acinq.eclair.MilliSatoshi
 import fr.acinq.eclair.db.Monitoring.Metrics.withMetrics
 import fr.acinq.eclair.db.Monitoring.Tags.DbBackends
@@ -162,7 +162,7 @@ class PgPaymentsDb(implicit ds: DataSource, lock: PgLock) extends PaymentsDb wit
       rs.getString("payment_type"),
       MilliSatoshi(rs.getLong("amount_msat")),
       MilliSatoshi(rs.getLong("recipient_amount_msat")),
-      PublicKey(rs.getByteVectorFromHex("recipient_node_id")),
+      new PublicKey(rs.getByteVectorFromHex("recipient_node_id").toArray),
       rs.getTimestamp("created_at").getTime,
       rs.getStringNullable("payment_request").map(PaymentRequest.read),
       status

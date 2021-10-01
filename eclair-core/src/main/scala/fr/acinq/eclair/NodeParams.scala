@@ -17,8 +17,7 @@
 package fr.acinq.eclair
 
 import com.typesafe.config.{Config, ConfigFactory, ConfigValueType}
-import fr.acinq.bitcoin.Crypto.PublicKey
-import fr.acinq.bitcoin.{Block, ByteVector32, Crypto, Satoshi}
+import fr.acinq.bitcoin.{Block, ByteVector32, Crypto, PrivateKey, PublicKey, Satoshi}
 import fr.acinq.eclair.Setup.Seeds
 import fr.acinq.eclair.blockchain.fee._
 import fr.acinq.eclair.channel.Channel
@@ -34,6 +33,7 @@ import fr.acinq.eclair.tor.Socks5ProxyParams
 import fr.acinq.eclair.wire.protocol.{Color, EncodingType, NodeAddress}
 import grizzled.slf4j.Logging
 import scodec.bits.ByteVector
+import KotlinUtils._
 
 import java.io.File
 import java.net.InetSocketAddress
@@ -95,7 +95,7 @@ case class NodeParams(nodeKeyManager: NodeKeyManager,
                       enableTrampolinePayment: Boolean,
                       balanceCheckInterval: FiniteDuration,
                       blockchainWatchdogSources: Seq[String]) {
-  val privateKey: Crypto.PrivateKey = nodeKeyManager.nodeKey.privateKey
+  val privateKey: PrivateKey = nodeKeyManager.nodeKey.privateKey
 
   val nodeId: PublicKey = nodeKeyManager.nodeId
 
@@ -161,7 +161,7 @@ object NodeParams extends Logging {
       } else {
         val randomSeed = randomBytes32()
         writeSeedToFile(seedPath, randomSeed)
-        randomSeed.bytes
+        ByteVector.view(randomSeed.toByteArray)
       }
     }
 
@@ -231,7 +231,7 @@ object NodeParams extends Logging {
     val watchSpentWindow = FiniteDuration(config.getDuration("watch-spent-window").getSeconds, TimeUnit.SECONDS)
     require(watchSpentWindow > 0.seconds, "watch-spent-window must be strictly greater than 0")
 
-    val dustLimitSatoshis = Satoshi(config.getLong("dust-limit-satoshis"))
+    val dustLimitSatoshis = new Satoshi(config.getLong("dust-limit-satoshis"))
     if (chainHash == Block.LivenetGenesisBlock.hash) {
       require(dustLimitSatoshis >= Channel.MIN_DUST_LIMIT, s"dust limit must be greater than ${Channel.MIN_DUST_LIMIT}")
     }
@@ -277,13 +277,13 @@ object NodeParams extends Logging {
     val coreAndPluginFeatures = features.copy(unknown = features.unknown ++ pluginMessageParams.map(_.pluginFeature))
 
     val overrideFeatures: Map[PublicKey, Features] = config.getConfigList("override-features").asScala.map { e =>
-      val p = PublicKey(ByteVector.fromValidHex(e.getString("nodeid")))
+      val p = new PublicKey(ByteVector.fromValidHex(e.getString("nodeid")))
       val f = Features.fromConfiguration(e)
       validateFeatures(f)
       p -> f.copy(unknown = f.unknown ++ pluginMessageParams.map(_.pluginFeature))
     }.toMap
 
-    val syncWhitelist: Set[PublicKey] = config.getStringList("sync-whitelist").asScala.map(s => PublicKey(ByteVector.fromValidHex(s))).toSet
+    val syncWhitelist: Set[PublicKey] = config.getStringList("sync-whitelist").asScala.map(s => new PublicKey(ByteVector.fromValidHex(s))).toSet
 
     val socksProxy_opt = if (config.getBoolean("socks5.enabled")) {
       Some(Socks5ProxyParams(
@@ -326,7 +326,7 @@ object NodeParams extends Logging {
       boundaries = SearchBoundaries(
         maxRouteLength = config.getInt("boundaries.max-route-length"),
         maxCltv = CltvExpiryDelta(config.getInt("boundaries.max-cltv")),
-        maxFeeFlat = Satoshi(config.getLong("boundaries.max-fee-flat-sat")).toMilliSatoshi,
+        maxFeeFlat = new Satoshi(config.getLong("boundaries.max-fee-flat-sat")).toMilliSatoshi,
         maxFeeProportional = config.getDouble("boundaries.max-fee-proportional-percent") / 100.0),
       heuristics = if (config.getBoolean("use-ratios")) {
         Left(WeightRatios(
@@ -344,7 +344,7 @@ object NodeParams extends Logging {
         ))
       },
       mpp = MultiPartParams(
-        Satoshi(config.getLong("mpp.min-amount-satoshis")).toMilliSatoshi,
+        new Satoshi(config.getLong("mpp.min-amount-satoshis")).toMilliSatoshi,
         config.getInt("mpp.max-parts")),
       experimentName = name,
       experimentPercentage = config.getInt("percentage"))
@@ -374,7 +374,7 @@ object NodeParams extends Logging {
       overrideFeatures = overrideFeatures,
       syncWhitelist = syncWhitelist,
       dustLimit = dustLimitSatoshis,
-      maxRemoteDustLimit = Satoshi(config.getLong("max-remote-dust-limit-satoshis")),
+      maxRemoteDustLimit = new Satoshi(config.getLong("max-remote-dust-limit-satoshis")),
       onChainFeeConf = OnChainFeeConf(
         feeTargets = feeTargets,
         feeEstimator = feeEstimator,
@@ -383,14 +383,14 @@ object NodeParams extends Logging {
         defaultFeerateTolerance = FeerateTolerance(
           config.getDouble("on-chain-fees.feerate-tolerance.ratio-low"),
           config.getDouble("on-chain-fees.feerate-tolerance.ratio-high"),
-          FeeratePerKw(FeeratePerByte(Satoshi(config.getLong("on-chain-fees.feerate-tolerance.anchor-output-max-commit-feerate"))))
+          FeeratePerKw(FeeratePerByte(new Satoshi(config.getLong("on-chain-fees.feerate-tolerance.anchor-output-max-commit-feerate"))))
         ),
         perNodeFeerateTolerance = config.getConfigList("on-chain-fees.override-feerate-tolerance").asScala.map { e =>
-          val nodeId = PublicKey(ByteVector.fromValidHex(e.getString("nodeid")))
+          val nodeId = new PublicKey(ByteVector.fromValidHex(e.getString("nodeid")))
           val tolerance = FeerateTolerance(
             e.getDouble("feerate-tolerance.ratio-low"),
             e.getDouble("feerate-tolerance.ratio-high"),
-            FeeratePerKw(FeeratePerByte(Satoshi(e.getLong("feerate-tolerance.anchor-output-max-commit-feerate"))))
+            FeeratePerKw(FeeratePerByte(new Satoshi(e.getLong("feerate-tolerance.anchor-output-max-commit-feerate"))))
           )
           nodeId -> tolerance
         }.toMap
@@ -423,8 +423,8 @@ object NodeParams extends Logging {
       watchSpentWindow = watchSpentWindow,
       paymentRequestExpiry = FiniteDuration(config.getDuration("payment-request-expiry").getSeconds, TimeUnit.SECONDS),
       multiPartPaymentExpiry = FiniteDuration(config.getDuration("multi-part-payment-expiry").getSeconds, TimeUnit.SECONDS),
-      minFundingSatoshis = Satoshi(config.getLong("min-funding-satoshis")),
-      maxFundingSatoshis = Satoshi(config.getLong("max-funding-satoshis")),
+      minFundingSatoshis = new Satoshi(config.getLong("min-funding-satoshis")),
+      maxFundingSatoshis = new Satoshi(config.getLong("max-funding-satoshis")),
       peerConnectionConf = PeerConnection.Conf(
         authTimeout = FiniteDuration(config.getDuration("peer-connection.auth-timeout").getSeconds, TimeUnit.SECONDS),
         initTimeout = FiniteDuration(config.getDuration("peer-connection.init-timeout").getSeconds, TimeUnit.SECONDS),

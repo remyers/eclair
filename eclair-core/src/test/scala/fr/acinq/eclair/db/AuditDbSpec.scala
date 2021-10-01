@@ -16,7 +16,7 @@
 
 package fr.acinq.eclair.db
 
-import fr.acinq.bitcoin.Crypto.PrivateKey
+import fr.acinq.bitcoin.PrivateKey
 import fr.acinq.bitcoin.{ByteVector32, SatoshiLong, Transaction}
 import fr.acinq.eclair.TestDatabases.{TestPgDatabases, TestSqliteDatabases, migrationCheck}
 import fr.acinq.eclair._
@@ -32,6 +32,7 @@ import fr.acinq.eclair.payment._
 import fr.acinq.eclair.router.Announcements
 import fr.acinq.eclair.transactions.Transactions.PlaceHolderPubKey
 import fr.acinq.eclair.wire.protocol.Error
+import KotlinUtils._
 import org.scalatest.Tag
 import org.scalatest.funsuite.AnyFunSuite
 
@@ -67,7 +68,7 @@ class AuditDbSpec extends AnyFunSuite {
       val pp2b = PaymentReceived.PartialPayment(42100 msat, randomBytes32())
       val e2 = PaymentReceived(randomBytes32(), pp2a :: pp2b :: Nil)
       val e3 = ChannelPaymentRelayed(42000 msat, 1000 msat, randomBytes32(), randomBytes32(), randomBytes32())
-      val e4 = NetworkFeePaid(null, randomKey().publicKey, randomBytes32(), Transaction(0, Seq.empty, Seq.empty, 0), 42 sat, "mutual")
+      val e4 = NetworkFeePaid(null, randomKey().publicKey, randomBytes32(), new Transaction(0, Seq.empty, Seq.empty, 0), 42 sat, "mutual")
       val pp5a = PaymentSent.PartialPayment(UUID.randomUUID(), 42000 msat, 1000 msat, randomBytes32(), None, timestamp = 0)
       val pp5b = PaymentSent.PartialPayment(UUID.randomUUID(), 42100 msat, 900 msat, randomBytes32(), None, timestamp = 1)
       val e5 = PaymentSent(UUID.randomUUID(), randomBytes32(), randomBytes32(), 84100 msat, randomKey().publicKey, pp5a :: pp5b :: Nil)
@@ -127,10 +128,10 @@ class AuditDbSpec extends AnyFunSuite {
       db.add(TrampolinePaymentRelayed(randomBytes32(), Seq(PaymentRelayed.Part(25000 msat, c6)), Seq(PaymentRelayed.Part(20000 msat, c4)), randomKey().publicKey, 15000 msat))
       db.add(TrampolinePaymentRelayed(randomBytes32(), Seq(PaymentRelayed.Part(46000 msat, c6)), Seq(PaymentRelayed.Part(16000 msat, c2), PaymentRelayed.Part(10000 msat, c4), PaymentRelayed.Part(14000 msat, c4)), randomKey().publicKey, 37000 msat))
 
-      db.add(NetworkFeePaid(null, n2, c2, Transaction(0, Seq.empty, Seq.empty, 0), 200 sat, "funding"))
-      db.add(NetworkFeePaid(null, n2, c2, Transaction(0, Seq.empty, Seq.empty, 0), 300 sat, "mutual"))
-      db.add(NetworkFeePaid(null, n3, c3, Transaction(0, Seq.empty, Seq.empty, 0), 400 sat, "funding"))
-      db.add(NetworkFeePaid(null, n4, c4, Transaction(0, Seq.empty, Seq.empty, 0), 500 sat, "funding"))
+      db.add(NetworkFeePaid(null, n2, c2, new Transaction(0, Seq.empty, Seq.empty, 0), 200 sat, "funding"))
+      db.add(NetworkFeePaid(null, n2, c2, new Transaction(0, Seq.empty, Seq.empty, 0), 300 sat, "mutual"))
+      db.add(NetworkFeePaid(null, n3, c3, new Transaction(0, Seq.empty, Seq.empty, 0), 400 sat, "funding"))
+      db.add(NetworkFeePaid(null, n4, c4, new Transaction(0, Seq.empty, Seq.empty, 0), 500 sat, "funding"))
 
       // NB: we only count a relay fee for the outgoing channel, no the incoming one.
       assert(db.stats(0, System.currentTimeMillis + 1).toSet === Set(
@@ -161,7 +162,7 @@ class AuditDbSpec extends AnyFunSuite {
       // Fund channels.
       channelIds.foreach(channelId => {
         val nodeId = nodeIds(Random.nextInt(nodeCount))
-        db.add(NetworkFeePaid(null, nodeId, channelId, Transaction(0, Seq.empty, Seq.empty, 0), 100 sat, "funding"))
+        db.add(NetworkFeePaid(null, nodeId, channelId, new Transaction(0, Seq.empty, Seq.empty, 0), 100 sat, "funding"))
       })
       // Add relay events.
       (1 to eventCount).foreach(_ => {
@@ -188,10 +189,10 @@ class AuditDbSpec extends AnyFunSuite {
 
     val dbs = TestSqliteDatabases()
 
-    val ps = PaymentSent(UUID.randomUUID(), randomBytes32(), randomBytes32(), 42000 msat, PrivateKey(ByteVector32.One).publicKey, PaymentSent.PartialPayment(UUID.randomUUID(), 42000 msat, 1000 msat, randomBytes32(), None) :: Nil)
+    val ps = PaymentSent(UUID.randomUUID(), randomBytes32(), randomBytes32(), 42000 msat, new PrivateKey(ByteVector32.One).publicKey, PaymentSent.PartialPayment(UUID.randomUUID(), 42000 msat, 1000 msat, randomBytes32(), None) :: Nil)
     val pp1 = PaymentSent.PartialPayment(UUID.randomUUID(), 42001 msat, 1001 msat, randomBytes32(), None)
     val pp2 = PaymentSent.PartialPayment(UUID.randomUUID(), 42002 msat, 1002 msat, randomBytes32(), None)
-    val ps1 = PaymentSent(UUID.randomUUID(), randomBytes32(), randomBytes32(), 84003 msat, PrivateKey(ByteVector32.One).publicKey, pp1 :: pp2 :: Nil)
+    val ps1 = PaymentSent(UUID.randomUUID(), randomBytes32(), randomBytes32(), 84003 msat, new PrivateKey(ByteVector32.One).publicKey, pp1 :: pp2 :: Nil)
     val e1 = ChannelErrorOccurred(null, randomBytes32(), randomKey().publicKey, null, LocalError(new RuntimeException("oops")), isFatal = true)
     val e2 = ChannelErrorOccurred(null, randomBytes32(), randomKey().publicKey, null, RemoteError(Error(randomBytes32(), "remote oops")), isFatal = true)
 
@@ -303,7 +304,7 @@ class AuditDbSpec extends AnyFunSuite {
 
     val pp1 = PaymentSent.PartialPayment(UUID.randomUUID(), 500 msat, 10 msat, randomBytes32(), None, 100)
     val pp2 = PaymentSent.PartialPayment(UUID.randomUUID(), 600 msat, 5 msat, randomBytes32(), None, 110)
-    val ps1 = PaymentSent(UUID.randomUUID(), randomBytes32(), randomBytes32(), 1100 msat, PrivateKey(ByteVector32.One).publicKey, pp1 :: pp2 :: Nil)
+    val ps1 = PaymentSent(UUID.randomUUID(), randomBytes32(), randomBytes32(), 1100 msat, new PrivateKey(ByteVector32.One).publicKey, pp1 :: pp2 :: Nil)
 
     val relayed1 = ChannelPaymentRelayed(600 msat, 500 msat, randomBytes32(), randomBytes32(), randomBytes32(), 105)
     val relayed2 = ChannelPaymentRelayed(650 msat, 500 msat, randomBytes32(), randomBytes32(), randomBytes32(), 115)
