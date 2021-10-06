@@ -590,12 +590,13 @@ object Commitments {
       if (feeConf.feerateToleranceFor(commitments.remoteNodeId).dustTolerance.closeOnUpdateFeeOverflow) {
         val maxDustExposure = feeConf.feerateToleranceFor(commitments.remoteNodeId).dustTolerance.maxExposure
         // we apply the other pending changes before evaluating our future dust exposure
-        val localReduced = CommitmentSpec.reduce(commitments1.localCommit.spec, commitments1.localChanges.proposed, commitments1.remoteChanges.acked)
+        val localReduced = CommitmentSpec.reduce(commitments.localCommit.spec, commitments.localChanges.acked, commitments.remoteChanges.proposed)
         val localDustExposureAfterFeeUpdate = CommitmentSpec.dustExposure(localReduced, cmd.feeratePerKw, commitments1.localParams.dustLimit, commitments1.commitmentFormat)
         if (localDustExposureAfterFeeUpdate > maxDustExposure) {
           return Left(LocalDustHtlcExposureTooHigh(commitments.channelId, maxDustExposure, localDustExposureAfterFeeUpdate))
         }
-        val remoteDustExposureAfterFeeUpdate = CommitmentSpec.dustExposure(reduced, cmd.feeratePerKw, commitments1.remoteParams.dustLimit, commitments1.commitmentFormat)
+        val remoteReduced = reduced
+        val remoteDustExposureAfterFeeUpdate = CommitmentSpec.dustExposure(remoteReduced, cmd.feeratePerKw, commitments1.remoteParams.dustLimit, commitments1.commitmentFormat)
         if (remoteDustExposureAfterFeeUpdate > maxDustExposure) {
           return Left(RemoteDustHtlcExposureTooHigh(commitments.channelId, maxDustExposure, remoteDustExposureAfterFeeUpdate))
         }
@@ -637,11 +638,12 @@ object Commitments {
         // if we would overflow our dust exposure with the new feerate, we reject this fee update
         if (feeConf.feerateToleranceFor(commitments.remoteNodeId).dustTolerance.closeOnUpdateFeeOverflow) {
           val maxDustExposure = feeConf.feerateToleranceFor(commitments.remoteNodeId).dustTolerance.maxExposure
-          val localDustExposureAfterFeeUpdate = CommitmentSpec.dustExposure(reduced, fee.feeratePerKw, commitments1.localParams.dustLimit, commitments1.commitmentFormat)
+          val localReduced = reduced
+          val localDustExposureAfterFeeUpdate = CommitmentSpec.dustExposure(localReduced, fee.feeratePerKw, commitments1.localParams.dustLimit, commitments1.commitmentFormat)
           if (localDustExposureAfterFeeUpdate > maxDustExposure) {
             return Left(LocalDustHtlcExposureTooHigh(commitments.channelId, maxDustExposure, localDustExposureAfterFeeUpdate))
           }
-          val remoteReduced = CommitmentSpec.reduce(commitments1.remoteCommit.spec, commitments1.remoteChanges.proposed, commitments1.localChanges.acked)
+          val remoteReduced = CommitmentSpec.reduce(commitments.remoteCommit.spec, commitments.remoteChanges.acked, commitments.localChanges.proposed)
           val remoteDustExposureAfterFeeUpdate = CommitmentSpec.dustExposure(remoteReduced, fee.feeratePerKw, commitments1.remoteParams.dustLimit, commitments1.commitmentFormat)
           if (remoteDustExposureAfterFeeUpdate > maxDustExposure) {
             return Left(RemoteDustHtlcExposureTooHigh(commitments.channelId, maxDustExposure, remoteDustExposureAfterFeeUpdate))
