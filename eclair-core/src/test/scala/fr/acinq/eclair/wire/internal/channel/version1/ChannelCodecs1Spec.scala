@@ -2,9 +2,9 @@ package fr.acinq.eclair.wire.internal.channel.version1
 
 import akka.actor.ActorSystem
 import akka.testkit.TestProbe
-import fr.acinq.bitcoin.Crypto.PrivateKey
-import fr.acinq.bitcoin.DeterministicWallet.KeyPath
-import fr.acinq.bitcoin.{DeterministicWallet, OutPoint, Satoshi, SatoshiLong, Script}
+import fr.acinq.bitcoinscala.Crypto.PrivateKey
+import fr.acinq.bitcoinscala.DeterministicWallet.KeyPath
+import fr.acinq.bitcoinscala.{DeterministicWallet, OutPoint, Satoshi, SatoshiLong, Script}
 import fr.acinq.eclair.blockchain.fee.FeeratePerKw
 import fr.acinq.eclair.channel.{LocalParams, Origin, RemoteParams}
 import fr.acinq.eclair.transactions.{CommitmentSpec, DirectedHtlc, IncomingHtlc, OutgoingHtlc}

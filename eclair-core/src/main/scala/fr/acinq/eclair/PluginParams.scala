@@ -17,8 +17,8 @@
 package fr.acinq.eclair
 
 import akka.event.LoggingAdapter
-import fr.acinq.bitcoin.ByteVector32
-import fr.acinq.bitcoin.Crypto.PublicKey
+import fr.acinq.bitcoinscala.ByteVector32
+import fr.acinq.bitcoinscala.Crypto.PublicKey
 import fr.acinq.eclair.channel.Origin
 import fr.acinq.eclair.payment.relay.PostRestartHtlcCleaner.IncomingHtlc
 

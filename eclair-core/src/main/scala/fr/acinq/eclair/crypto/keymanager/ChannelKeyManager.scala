@@ -16,9 +16,9 @@
 
 package fr.acinq.eclair.crypto.keymanager
 
-import fr.acinq.bitcoin.Crypto.{PrivateKey, PublicKey}
-import fr.acinq.bitcoin.DeterministicWallet.ExtendedPublicKey
-import fr.acinq.bitcoin.{ByteVector64, Crypto, DeterministicWallet, Protocol}
+import fr.acinq.bitcoinscala.Crypto.{PrivateKey, PublicKey}
+import fr.acinq.bitcoinscala.DeterministicWallet.ExtendedPublicKey
+import fr.acinq.bitcoinscala.{ByteVector64, Crypto, DeterministicWallet, Protocol}
 import fr.acinq.eclair.channel.{ChannelConfig, LocalParams}
 import fr.acinq.eclair.transactions.Transactions.{CommitmentFormat, TransactionWithInputInfo, TxOwner}
 import scodec.bits.ByteVector

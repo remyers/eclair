@@ -16,9 +16,9 @@
 
 package fr.acinq.eclair.crypto.keymanager
 
-import fr.acinq.bitcoin.Crypto.{PrivateKey, PublicKey}
-import fr.acinq.bitcoin.DeterministicWallet.ExtendedPrivateKey
-import fr.acinq.bitcoin.{Block, ByteVector32, ByteVector64, Crypto, DeterministicWallet}
+import fr.acinq.bitcoinscala.Crypto.{PrivateKey, PublicKey}
+import fr.acinq.bitcoinscala.DeterministicWallet.ExtendedPrivateKey
+import fr.acinq.bitcoinscala.{Block, ByteVector32, ByteVector64, Crypto, DeterministicWallet}
 import fr.acinq.eclair.router.Announcements
 import grizzled.slf4j.Logging
 import scodec.bits.ByteVector

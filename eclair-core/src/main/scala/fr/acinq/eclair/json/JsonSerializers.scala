@@ -17,8 +17,9 @@
 package fr.acinq.eclair.json
 
 import com.google.common.net.HostAndPort
-import fr.acinq.bitcoin.Crypto.{PrivateKey, PublicKey}
-import fr.acinq.bitcoin.{Btc, ByteVector32, ByteVector64, OutPoint, Satoshi, Transaction}
+import fr.acinq.bitcoinscala.Crypto.{PrivateKey, PublicKey}
+import fr.acinq.bitcoinscala.DeterministicWallet.KeyPath
+import fr.acinq.bitcoinscala.{Btc, ByteVector32, ByteVector64, OutPoint, Satoshi, Transaction}
 import fr.acinq.eclair.balance.CheckBalance.{CorrectedOnChainBalance, GlobalBalance, OffChainBalance}
 import fr.acinq.eclair.blockchain.fee.FeeratePerKw
 import fr.acinq.eclair.channel._
@@ -204,6 +205,10 @@ object TransactionSerializer extends MinimalSerializer({
     JField("txid", JString(x.txid.toHex)),
     JField("tx", JString(x.toString()))
   ))
+})
+
+object KeyPathSerializer extends MinimalSerializer({
+  case x: KeyPath => JObject(JField("path", JArray(x.path.map(x => JLong(x)).toList)))
 })
 
 object TransactionWithInputInfoSerializer extends MinimalSerializer({
@@ -516,6 +521,7 @@ object JsonSerializers {
     PrivateKeySerializer +
     TransactionSerializer +
     TransactionWithInputInfoSerializer +
+    KeyPathSerializer +
     InetSocketAddressSerializer +
     OutPointSerializer +
     OutPointKeySerializer +

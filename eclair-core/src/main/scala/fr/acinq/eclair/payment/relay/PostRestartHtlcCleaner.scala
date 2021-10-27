@@ -19,8 +19,8 @@ package fr.acinq.eclair.payment.relay
 import akka.Done
 import akka.actor.{Actor, ActorLogging, ActorRef, Props}
 import akka.event.LoggingAdapter
-import fr.acinq.bitcoin.ByteVector32
-import fr.acinq.bitcoin.Crypto.PrivateKey
+import fr.acinq.bitcoinscala.ByteVector32
+import fr.acinq.bitcoinscala.Crypto.PrivateKey
 import fr.acinq.eclair.channel.Helpers.Closing
 import fr.acinq.eclair.channel._
 import fr.acinq.eclair.db._

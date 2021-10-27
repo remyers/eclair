@@ -17,8 +17,8 @@
 package fr.acinq.eclair.payment.send
 
 import akka.actor.{Actor, ActorContext, ActorLogging, ActorRef, Props}
-import fr.acinq.bitcoin.Crypto.PublicKey
-import fr.acinq.bitcoin.{ByteVector32, Crypto}
+import fr.acinq.bitcoinscala.Crypto.PublicKey
+import fr.acinq.bitcoinscala.{ByteVector32, Crypto}
 import fr.acinq.eclair.Features.BasicMultiPartPayment
 import fr.acinq.eclair.channel.Channel
 import fr.acinq.eclair.crypto.Sphinx

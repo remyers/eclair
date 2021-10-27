@@ -18,8 +18,8 @@ package fr.acinq.eclair.db
 
 import akka.actor.{Actor, DiagnosticActorLogging, Props}
 import akka.event.Logging.MDC
-import fr.acinq.bitcoin.Crypto.PublicKey
-import fr.acinq.bitcoin.{ByteVector32, Satoshi}
+import fr.acinq.bitcoinscala.Crypto.PublicKey
+import fr.acinq.bitcoinscala.{ByteVector32, Satoshi}
 import fr.acinq.eclair.channel.Helpers.Closing._
 import fr.acinq.eclair.channel.Monitoring.{Metrics => ChannelMetrics, Tags => ChannelTags}
 import fr.acinq.eclair.channel._

@@ -16,7 +16,7 @@
 
 package fr.acinq.eclair.blockchain
 
-import fr.acinq.bitcoin.{ByteVector32, Transaction}
+import fr.acinq.bitcoinscala.{ByteVector32, Transaction}
 import fr.acinq.eclair.BlockHeight
 import fr.acinq.eclair.blockchain.fee.FeeratesPerKw
 

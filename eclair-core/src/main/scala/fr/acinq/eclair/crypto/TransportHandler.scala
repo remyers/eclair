@@ -21,8 +21,8 @@ import akka.event.Logging.MDC
 import akka.event._
 import akka.io.Tcp
 import akka.util.ByteString
-import fr.acinq.bitcoin.Crypto.PublicKey
-import fr.acinq.bitcoin.Protocol
+import fr.acinq.bitcoinscala.Crypto.PublicKey
+import fr.acinq.bitcoinscala.Protocol
 import fr.acinq.eclair.Logs.LogCategory
 import fr.acinq.eclair.crypto.ChaCha20Poly1305.ChaCha20Poly1305Error
 import fr.acinq.eclair.crypto.Noise._

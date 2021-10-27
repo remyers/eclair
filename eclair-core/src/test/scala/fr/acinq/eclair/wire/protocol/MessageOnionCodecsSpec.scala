@@ -1,7 +1,7 @@
 package fr.acinq.eclair.wire.protocol
 
-import fr.acinq.bitcoin.ByteVector32
-import fr.acinq.bitcoin.Crypto.{PrivateKey, PublicKey}
+import fr.acinq.bitcoinscala.ByteVector32
+import fr.acinq.bitcoinscala.Crypto.{PrivateKey, PublicKey}
 import fr.acinq.eclair.crypto.Sphinx.RouteBlinding
 import fr.acinq.eclair.wire.protocol.MessageOnion._
 import fr.acinq.eclair.wire.protocol.MessageOnionCodecs._

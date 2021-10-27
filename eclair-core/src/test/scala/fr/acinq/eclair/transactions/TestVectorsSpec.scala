@@ -16,8 +16,9 @@
 
 package fr.acinq.eclair.transactions
 
-import fr.acinq.bitcoin.Crypto.{PrivateKey, PublicKey}
-import fr.acinq.bitcoin.{ByteVector32, Crypto, SatoshiLong, Script, ScriptFlags, Transaction}
+import fr.acinq.bitcoinscala.Crypto.{PrivateKey, PublicKey}
+import fr.acinq.bitcoinscala.{ByteVector32, Crypto, SatoshiLong, Script, Transaction}
+import fr.acinq.bitcoin.ScriptFlags
 import fr.acinq.eclair.blockchain.fee.FeeratePerKw
 import fr.acinq.eclair.channel.ChannelFeatures
 import fr.acinq.eclair.channel.Helpers.Funding

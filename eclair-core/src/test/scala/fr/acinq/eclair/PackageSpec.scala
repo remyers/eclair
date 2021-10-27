@@ -16,8 +16,9 @@
 
 package fr.acinq.eclair
 
-import fr.acinq.bitcoin.Crypto.PrivateKey
-import fr.acinq.bitcoin.{Base58, Base58Check, Bech32, Block, ByteVector32, Crypto, Script}
+import fr.acinq.bitcoin.{Base58, Base58Check, Bech32}
+import fr.acinq.bitcoinscala.Crypto.PrivateKey
+import fr.acinq.bitcoinscala.{Block, ByteVector32, Crypto, Script}
 import org.scalatest.funsuite.AnyFunSuite
 import scodec.bits._
 
@@ -28,6 +29,9 @@ import scala.util.Try
  */
 
 class PackageSpec extends AnyFunSuite {
+  implicit def byteVector2array(input: ByteVector): Array[Byte] = input.toArray
+
+  implicit def byteVector322array(input: ByteVector32): Array[Byte] = input.toArray
 
   test("compute long channel id") {
     val data = ((hex"FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF", 0, hex"FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF") ::

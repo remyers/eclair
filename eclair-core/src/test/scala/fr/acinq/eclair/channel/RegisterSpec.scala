@@ -4,8 +4,8 @@ import fr.acinq.eclair._
 
 import akka.actor.{ActorRef, Props}
 import akka.testkit.TestProbe
-import fr.acinq.bitcoin.ByteVector32
-import fr.acinq.bitcoin.Crypto.PublicKey
+import fr.acinq.bitcoinscala.ByteVector32
+import fr.acinq.bitcoinscala.Crypto.PublicKey
 import org.scalatest.funsuite.AnyFunSuiteLike
 import org.scalatest.ParallelTestExecution
 

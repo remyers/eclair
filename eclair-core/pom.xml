@@ -21,7 +21,7 @@
     <parent>
         <groupId>fr.acinq.eclair</groupId>
         <artifactId>eclair_2.13</artifactId>
-        <version>0.7.1-SNAPSHOT</version>
+        <version>0.7.1-KMP-SNAPSHOT</version>
     </parent>
 
     <artifactId>eclair-core_2.13</artifactId>
@@ -163,6 +163,12 @@
             <groupId>com.softwaremill.sttp</groupId>
             <artifactId>okhttp-backend_${scala.version.short}</artifactId>
             <version>${sttp.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.jetbrains.kotlin</groupId>
+                    <artifactId>kotlin-stdlib</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <!-- JSON -->
         <dependency>

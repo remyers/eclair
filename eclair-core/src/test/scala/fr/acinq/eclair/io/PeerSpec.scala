@@ -21,8 +21,8 @@ import akka.actor.typed.scaladsl.adapter.ClassicActorRefOps
 import akka.actor.{ActorContext, ActorRef, FSM, PoisonPill, Status}
 import akka.testkit.{TestFSMRef, TestProbe}
 import com.google.common.net.HostAndPort
-import fr.acinq.bitcoin.Crypto.PublicKey
-import fr.acinq.bitcoin.{Block, Btc, SatoshiLong, Script}
+import fr.acinq.bitcoinscala.Crypto.PublicKey
+import fr.acinq.bitcoinscala.{Block, Btc, ByteVector32, SatoshiLong, Script}
 import fr.acinq.eclair.FeatureSupport.{Mandatory, Optional}
 import fr.acinq.eclair.Features._
 import fr.acinq.eclair.TestConstants._

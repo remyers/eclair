@@ -18,9 +18,9 @@ package fr.acinq.eclair.crypto.keymanager
 
 import java.io.File
 import java.nio.file.Files
-import fr.acinq.bitcoin.Crypto.{PrivateKey, PublicKey}
-import fr.acinq.bitcoin.DeterministicWallet.KeyPath
-import fr.acinq.bitcoin.{Block, ByteVector32, DeterministicWallet}
+import fr.acinq.bitcoinscala.Crypto.{PrivateKey, PublicKey}
+import fr.acinq.bitcoinscala.DeterministicWallet.KeyPath
+import fr.acinq.bitcoinscala.{Block, ByteVector32, DeterministicWallet}
 import fr.acinq.eclair.Setup.Seeds
 import fr.acinq.eclair.channel.ChannelConfig
 import fr.acinq.eclair.crypto.ShaChain

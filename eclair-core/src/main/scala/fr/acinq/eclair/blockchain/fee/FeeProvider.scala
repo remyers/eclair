@@ -16,7 +16,7 @@
 
 package fr.acinq.eclair.blockchain.fee
 
-import fr.acinq.bitcoin.{Satoshi, SatoshiLong}
+import fr.acinq.bitcoinscala.{Satoshi, SatoshiLong}
 
 import scala.concurrent.Future
 

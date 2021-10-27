@@ -1,6 +1,6 @@
 package fr.acinq.eclair.wire.protocol
 
-import fr.acinq.bitcoin.Crypto.PublicKey
+import fr.acinq.bitcoinscala.Crypto.PublicKey
 import fr.acinq.eclair.crypto.Sphinx
 import fr.acinq.eclair.wire.protocol.RouteBlindingEncryptedDataTlv._
 import fr.acinq.eclair.{ShortChannelId, UInt64, randomKey}

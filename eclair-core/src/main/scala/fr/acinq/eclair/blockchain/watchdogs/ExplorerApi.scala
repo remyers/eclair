@@ -23,7 +23,8 @@ import akka.pattern.after
 import com.softwaremill.sttp.json4s.asJson
 import com.softwaremill.sttp.okhttp.OkHttpFutureBackend
 import com.softwaremill.sttp.{StatusCodes, SttpBackend, SttpBackendOptions, Uri, UriContext, sttp}
-import fr.acinq.bitcoin.{Block, BlockHeader, ByteVector32}
+import fr.acinq.bitcoinscala.{ByteVector32}
+import fr.acinq.bitcoin.{Block, BlockHeader}
 import fr.acinq.eclair.blockchain.watchdogs.BlockchainWatchdog.{BlockHeaderAt, LatestHeaders, SupportsTor}
 import fr.acinq.eclair.blockchain.watchdogs.Monitoring.{Metrics, Tags}
 import fr.acinq.eclair.tor.Socks5ProxyParams
@@ -47,12 +48,14 @@ object ExplorerApi {
   implicit val formats: DefaultFormats = DefaultFormats
   implicit val serialization: Serialization = Serialization
 
+  implicit def scala2kmp(input: ByteVector32): fr.acinq.bitcoin.ByteVector32 = new fr.acinq.bitcoin.ByteVector32(input.toArray)
+
   sealed trait Explorer {
     // @formatter:off
     /** Explorer friendly-name. */
     def name: String
     /** Map from chainHash to explorer API URI. */
-    def baseUris: Map[ByteVector32, Uri]
+    def baseUris: Map[fr.acinq.bitcoin.ByteVector32, Uri]
     /** Fetch latest headers from the explorer. */
     def getLatestHeaders(baseUri: Uri, currentBlockHeight: BlockHeight)(implicit context: ActorContext[Command]): Future[LatestHeaders]
     // @formatter:on
@@ -164,7 +167,7 @@ object ExplorerApi {
           val JInt(nonce) = block \ "nonce"
           val previousBlockHash = (block \ "prev_block").extractOpt[String].map(ByteVector32.fromValidHex(_).reverse).getOrElse(ByteVector32.Zeroes)
           val merkleRoot = (block \ "mrkl_root").extractOpt[String].map(ByteVector32.fromValidHex(_).reverse).getOrElse(ByteVector32.Zeroes)
-          val header = BlockHeader(version.toLong, previousBlockHash, merkleRoot, OffsetDateTime.parse(time).toEpochSecond, bits.toLong, nonce.toLong)
+          val header = new BlockHeader(version.toLong, previousBlockHash, merkleRoot, OffsetDateTime.parse(time).toEpochSecond, bits.toLong, nonce.toLong)
           BlockHeaderAt(BlockHeight(height.toLong), header)
         }))
     } yield header
@@ -193,7 +196,7 @@ object ExplorerApi {
             val JInt(nonce) = block \ "nonce"
             val previousBlockHash = (block \ "previousblockhash").extractOpt[String].map(ByteVector32.fromValidHex(_).reverse).getOrElse(ByteVector32.Zeroes)
             val merkleRoot = (block \ "merkle_root").extractOpt[String].map(ByteVector32.fromValidHex(_).reverse).getOrElse(ByteVector32.Zeroes)
-            val header = BlockHeader(version.toLong, previousBlockHash, merkleRoot, time.toLong, bits.toLong, nonce.toLong)
+            val header = new BlockHeader(version.toLong, previousBlockHash, merkleRoot, time.toLong, bits.toLong, nonce.toLong)
             BlockHeaderAt(BlockHeight(height.toLong), header)
           }))
           .map(headers => LatestHeaders(currentBlockHeight, headers.filter(_.blockHeight >= currentBlockHeight).toSet, name))

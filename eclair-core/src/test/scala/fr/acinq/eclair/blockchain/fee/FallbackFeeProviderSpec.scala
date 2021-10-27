@@ -16,7 +16,7 @@
 
 package fr.acinq.eclair.blockchain.fee
 
-import fr.acinq.bitcoin.SatoshiLong
+import fr.acinq.bitcoinscala.SatoshiLong
 import org.scalatest.funsuite.AnyFunSuite
 
 import scala.concurrent.duration._

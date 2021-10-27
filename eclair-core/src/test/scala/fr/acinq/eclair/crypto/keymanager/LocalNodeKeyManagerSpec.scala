@@ -19,9 +19,9 @@ package fr.acinq.eclair.crypto.keymanager
 import java.io.File
 import java.nio.file.Files
 
-import fr.acinq.bitcoin.Crypto.PublicKey
-import fr.acinq.bitcoin.DeterministicWallet.KeyPath
-import fr.acinq.bitcoin.{Block, ByteVector32, Crypto}
+import fr.acinq.bitcoinscala.Crypto.PublicKey
+import fr.acinq.bitcoinscala.DeterministicWallet.KeyPath
+import fr.acinq.bitcoinscala.{Block, ByteVector32, Crypto}
 import fr.acinq.eclair.Setup.Seeds
 import fr.acinq.eclair.{NodeParams, TestUtils}
 import org.scalatest.funsuite.AnyFunSuite
