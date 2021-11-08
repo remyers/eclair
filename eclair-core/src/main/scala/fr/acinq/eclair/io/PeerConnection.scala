@@ -171,19 +171,20 @@ class PeerConnection(keyPair: KeyPair, conf: PeerConnection.Conf, switchboard: A
           val pongSize = Random.nextInt(1000)
           val ping = Ping(pongSize, ByteVector.fill(pingSize)(0))
           startSingleTimer(PingTimeout.toString, PingTimeout(ping), conf.pingTimeout)
+          log.debug("sending ping: pingSize={} pongSize={} timeout={}", pingSize, pongSize, conf.pingTimeout)
           d.transport ! ping
           stay() using d.copy(expectedPong_opt = Some(ExpectedPong(ping)))
         } else {
-          log.warning(s"can't send ping, already have one in flight")
+          log.warning("can't send ping, already have one in flight")
           stay()
         }
 
       case Event(PingTimeout(ping), d: ConnectedData) =>
         if (conf.pingDisconnect) {
-          log.warning(s"no response to ping=$ping, closing connection")
+          log.warning("no response to ping, closing connection")
           d.transport ! PoisonPill
         } else {
-          log.warning(s"no response to ping=$ping (ignored)")
+          log.warning("no response to ping (ignored)")
         }
         stay()
 
@@ -434,7 +435,7 @@ class PeerConnection(keyPair: KeyPair, conf: PeerConnection.Conf, switchboard: A
   }
 
   def scheduleNextPing(): Unit = {
-    log.debug("next ping scheduled in {}", conf.pingInterval)
+//    log.debug("next ping scheduled in {}", conf.pingInterval)
     startSingleTimer(SEND_PING_TIMER, SendPing, conf.pingInterval)
   }
 
