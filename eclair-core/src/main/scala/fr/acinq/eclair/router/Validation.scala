@@ -71,6 +71,7 @@ object Validation {
     } else {
       log.info("validating shortChannelId={}", c.shortChannelId)
       watcher ! ValidateRequest(ctx.self, c)
+      origin.peerConnection ! TransportHandler.ReadAck(c)
       // we don't acknowledge the message just yet
       d.copy(awaiting = d.awaiting + (c -> Seq(origin)))
     }
@@ -80,13 +81,13 @@ object Validation {
     implicit val sender: ActorRef = ctx.self // necessary to preserve origin when sending messages to other actors
     import nodeParams.db.{network => db}
     import r.c
-    d0.awaiting.get(c) match {
-      case Some(origin +: _) => origin.peerConnection ! TransportHandler.ReadAck(c) // now we can acknowledge the message, we only need to do it for the first peer that sent us the announcement
-      case _ => ()
-    }
+//    d0.awaiting.get(c) match {
+//      case Some(origin +: _) => origin.peerConnection ! TransportHandler.ReadAck(c) // now we can acknowledge the message, we only need to do it for the first peer that sent us the announcement
+//      case _ => ()
+//    }
     val remoteOrigins_opt = d0.awaiting.get(c)
     Logs.withMdc(log)(Logs.mdc(remoteNodeId_opt = remoteOrigins_opt.flatMap(_.headOption).map(_.nodeId))) { // in the MDC we use the node id that sent us the announcement first
-      log.debug("got validation result for shortChannelId={} (awaiting={} stash.nodes={} stash.updates={})", c.shortChannelId, d0.awaiting.size, d0.stash.nodes.size, d0.stash.updates.size)
+      log.info("got validation result for shortChannelId={} (awaiting={} stash.nodes={} stash.updates={})", c.shortChannelId, d0.awaiting.size, d0.stash.nodes.size, d0.stash.updates.size)
       val publicChannel_opt = r match {
         case ValidateResult(c, Left(t)) =>
           log.warning("validation failure for shortChannelId={} reason={}", c.shortChannelId, t.getMessage)
