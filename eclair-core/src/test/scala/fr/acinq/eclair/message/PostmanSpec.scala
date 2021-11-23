@@ -20,7 +20,6 @@ import akka.actor.testkit.typed.scaladsl.{ScalaTestWithActorTestKit, TestProbe}
 import akka.actor.typed.ActorRef
 import akka.actor.typed.eventstream.EventStream
 import com.typesafe.config.ConfigFactory
-import fr.acinq.bitcoin.ByteVector32
 import fr.acinq.eclair.io.MessageRelay.{Disconnected, Sent}
 import fr.acinq.eclair.io.Switchboard.RelayMessage
 import fr.acinq.eclair.message.OnionMessages.ReceiveMessage

@@ -306,7 +306,7 @@ case class DualPaymentsDb(sqlite: SqlitePaymentsDb, postgres: PgPaymentsDb) exte
     sqlite.close()
   }
 
-  override def addIncomingPayment(pr: PaymentRequest, preimage: ByteVector32, paymentType: String): Unit = {
+  override def addIncomingPayment(pr: Bolt11Invoice, preimage: ByteVector32, paymentType: String): Unit = {
     runAsync(postgres.addIncomingPayment(pr, preimage, paymentType))
     sqlite.addIncomingPayment(pr, preimage, paymentType)
   }

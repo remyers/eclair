@@ -22,15 +22,15 @@ import fr.acinq.bitcoin.{ByteVector32, Crypto}
 import fr.acinq.eclair.Features.BasicMultiPartPayment
 import fr.acinq.eclair.channel.Channel
 import fr.acinq.eclair.crypto.Sphinx
+import fr.acinq.eclair.payment.Bolt11Invoice.ExtraHop
 import fr.acinq.eclair.payment.OutgoingPaymentPacket.Upstream
-import fr.acinq.eclair.payment.PaymentRequest.ExtraHop
 import fr.acinq.eclair.payment._
 import fr.acinq.eclair.payment.send.MultiPartPaymentLifecycle.{PreimageReceived, SendMultiPartPayment}
 import fr.acinq.eclair.payment.send.PaymentError._
 import fr.acinq.eclair.router.RouteNotFound
 import fr.acinq.eclair.router.Router._
 import fr.acinq.eclair.wire.protocol._
-import fr.acinq.eclair.{CltvExpiry, CltvExpiryDelta, MilliSatoshi, MilliSatoshiLong, NodeParams, randomBytes32}
+import fr.acinq.eclair.{CltvExpiry, CltvExpiryDelta, Features, MilliSatoshi, MilliSatoshiLong, NodeParams, randomBytes32}
 
 import java.util.UUID
 
@@ -45,25 +45,26 @@ class PaymentInitiator(nodeParams: NodeParams, outgoingPaymentFactory: PaymentIn
 
   def main(pending: Map[UUID, PendingPayment]): Receive = {
     case r: SendPaymentToNode =>
+      val replyTo = if (r.replyTo == ActorRef.noSender) sender() else r.replyTo
       val paymentId = UUID.randomUUID()
       if (!r.blockUntilComplete) {
         // Immediately return the paymentId
-        sender() ! paymentId
+        replyTo ! paymentId
       }
       val paymentCfg = SendPaymentConfig(paymentId, paymentId, r.externalId, r.paymentHash, r.recipientAmount, r.recipientNodeId, Upstream.Local(paymentId), Some(r.paymentRequest), storeInDb = true, publishEvent = true, recordPathFindingMetrics = true, Nil)
       val finalExpiry = r.finalExpiry(nodeParams.currentBlockHeight)
       r.paymentRequest.paymentSecret match {
-        case _ if !r.paymentRequest.features.areSupported(nodeParams) =>
-          sender() ! PaymentFailed(paymentId, r.paymentHash, LocalFailure(r.recipientAmount, Nil, UnsupportedFeatures(r.paymentRequest.features.features)) :: Nil)
+        case _ if !nodeParams.features.areSupported(r.paymentRequest.features) =>
+          replyTo ! PaymentFailed(paymentId, r.paymentHash, LocalFailure(r.recipientAmount, Nil, UnsupportedFeatures(r.paymentRequest.features)) :: Nil)
         case None =>
-          sender() ! PaymentFailed(paymentId, r.paymentHash, LocalFailure(r.recipientAmount, Nil, PaymentSecretMissing) :: Nil)
-        case Some(paymentSecret) if r.paymentRequest.features.allowMultiPart && nodeParams.features.hasFeature(BasicMultiPartPayment) =>
+          replyTo ! PaymentFailed(paymentId, r.paymentHash, LocalFailure(r.recipientAmount, Nil, PaymentSecretMissing) :: Nil)
+        case Some(paymentSecret) if r.paymentRequest.features.hasFeature(Features.BasicMultiPartPayment) && nodeParams.features.hasFeature(BasicMultiPartPayment) =>
           val fsm = outgoingPaymentFactory.spawnOutgoingMultiPartPayment(context, paymentCfg)
-          fsm ! SendMultiPartPayment(sender(), paymentSecret, r.recipientNodeId, r.recipientAmount, finalExpiry, r.maxAttempts, r.assistedRoutes, r.routeParams, userCustomTlvs = r.userCustomTlvs)
+          fsm ! SendMultiPartPayment(replyTo, paymentSecret, r.recipientNodeId, r.recipientAmount, finalExpiry, r.maxAttempts, r.assistedRoutes, r.routeParams, userCustomTlvs = r.userCustomTlvs)
         case Some(paymentSecret) =>
           val finalPayload = PaymentOnion.createSinglePartPayload(r.recipientAmount, finalExpiry, paymentSecret, r.userCustomTlvs)
           val fsm = outgoingPaymentFactory.spawnOutgoingPayment(context, paymentCfg)
-          fsm ! PaymentLifecycle.SendPaymentToNode(sender(), r.recipientNodeId, finalPayload, r.maxAttempts, r.assistedRoutes, r.routeParams)
+          fsm ! PaymentLifecycle.SendPaymentToNode(replyTo, r.recipientNodeId, finalPayload, r.maxAttempts, r.assistedRoutes, r.routeParams)
       }
 
     case r: SendSpontaneousPayment =>
@@ -81,7 +82,7 @@ class PaymentInitiator(nodeParams: NodeParams, outgoingPaymentFactory: PaymentIn
       r.trampolineAttempts match {
         case Nil =>
           sender() ! PaymentFailed(paymentId, r.paymentHash, LocalFailure(r.recipientAmount, Nil, TrampolineFeesMissing) :: Nil)
-        case _ if !r.paymentRequest.features.allowTrampoline && r.paymentRequest.amount.isEmpty =>
+        case _ if !r.paymentRequest.features.hasFeature(Features.TrampolinePayment) && r.paymentRequest.amount_opt.isEmpty =>
           sender() ! PaymentFailed(paymentId, r.paymentHash, LocalFailure(r.recipientAmount, Nil, TrampolineLegacyAmountLessInvoice) :: Nil)
         case (trampolineFees, trampolineExpiryDelta) :: remainingAttempts =>
           log.info(s"sending trampoline payment with trampoline fees=$trampolineFees and expiry delta=$trampolineExpiryDelta")
@@ -155,13 +156,13 @@ class PaymentInitiator(nodeParams: NodeParams, outgoingPaymentFactory: PaymentIn
       NodeHop(nodeParams.nodeId, trampolineNodeId, nodeParams.expiryDelta, 0 msat),
       NodeHop(trampolineNodeId, r.recipientNodeId, trampolineExpiryDelta, trampolineFees) // for now we only use a single trampoline hop
     )
-    val finalPayload = if (r.paymentRequest.features.allowMultiPart) {
+    val finalPayload = if (r.paymentRequest.features.hasFeature(Features.BasicMultiPartPayment)) {
       PaymentOnion.createMultiPartPayload(r.recipientAmount, r.recipientAmount, r.finalExpiry(nodeParams.currentBlockHeight), r.paymentRequest.paymentSecret.get)
     } else {
       PaymentOnion.createSinglePartPayload(r.recipientAmount, r.finalExpiry(nodeParams.currentBlockHeight), r.paymentRequest.paymentSecret.get)
     }
     // We assume that the trampoline node supports multi-part payments (it should).
-    val (trampolineAmount, trampolineExpiry, trampolineOnion) = if (r.paymentRequest.features.allowTrampoline) {
+    val (trampolineAmount, trampolineExpiry, trampolineOnion) = if (r.paymentRequest.features.hasFeature(Features.TrampolinePayment)) {
       OutgoingPaymentPacket.buildTrampolinePacket(r.paymentHash, trampolineRoute, finalPayload)
     } else {
       OutgoingPaymentPacket.buildTrampolineToLegacyPacket(r.paymentRequest, trampolineRoute, finalPayload)
@@ -249,7 +250,8 @@ object PaymentInitiator {
    * @param userCustomTlvs           (optional) user-defined custom tlvs that will be added to the onion sent to the target node.
    * @param blockUntilComplete       (optional) if true, wait until the payment completes before returning a result.
    */
-  case class SendPaymentToNode(recipientAmount: MilliSatoshi,
+  case class SendPaymentToNode(replyTo: ActorRef,
+                               recipientAmount: MilliSatoshi,
                                paymentRequest: PaymentRequest,
                                maxAttempts: Int,
                                fallbackFinalExpiryDelta: CltvExpiryDelta = Channel.MIN_CLTV_EXPIRY_DELTA,
