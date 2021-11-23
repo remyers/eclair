@@ -38,7 +38,7 @@ case class Bolt12Invoice(records: TlvStream[InvoiceTlv]) extends PaymentRequest 
 
   override val paymentHash: ByteVector32 = records.get[PaymentHash].get.hash
 
-  override val paymentSecret: Option[ByteVector32] = None
+  override val paymentSecret: Option[ByteVector32] = records.get[PaymentSecret].map(_.secret)
 
   override val paymentMetadata: Option[ByteVector] = None
 
@@ -122,10 +122,12 @@ case class Bolt12Invoice(records: TlvStream[InvoiceTlv]) extends PaymentRequest 
 object Bolt12Invoice {
   val DEFAULT_EXPIRY_SECONDS: Long = 7200
 
-  def apply(offer: Offer, request: InvoiceRequest, preimage: ByteVector, nodeKey: PrivateKey): Bolt12Invoice = {
+  def apply(offer: Offer, request: InvoiceRequest, preimage: ByteVector, secret: ByteVector32, nodeKey: PrivateKey, minFinalCltvExpiryDelta: Option[CltvExpiryDelta] = None): Bolt12Invoice = {
     val tlvs: Seq[InvoiceTlv] = Seq(
+      Some(Chain(request.chain)),
       Some(CreatedAt(TimestampSecond.now())),
       Some(PaymentHash(Crypto.sha256(preimage))),
+      Some(PaymentSecret(secret)),
       Some(OfferId(offer.offerId)),
       Some(NodeId(nodeKey.publicKey)),
       Some(Amount(request.amount.orElse(offer.amount.map(_ * request.quantity)).getOrElse(10000000 msat))),
@@ -135,7 +137,8 @@ object Bolt12Invoice {
       request.payerInfo.map(PayerInfo),
       request.payerNote.map(PayerNote),
       request.replaceInvoice.map(ReplaceInvoice),
-      offer.issuer.map(Issuer)
+      offer.issuer.map(Issuer),
+      minFinalCltvExpiryDelta.map(Cltv),
       // TODO: add features
     ).flatten
     val signature = signSchnorr("lightning" + "invoice" + "signature", rootHash(TlvStream(tlvs), invoiceTlvCodec).get, nodeKey)

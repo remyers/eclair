@@ -39,11 +39,19 @@ object Postman {
                          replyPathId: Option[ByteVector32],
                          replyTo: ActorRef[OnionMessageResponse],
                          timeout: FiniteDuration) extends Command
+  case class SendMessageToBoth(nextNodeId1: PublicKey,
+                               message1: OnionMessage,
+                               replyPathId1: ByteVector32,
+                               nextNodeId2: PublicKey,
+                               message2: OnionMessage,
+                               replyPathId2: ByteVector32,
+                               replyTo: ActorRef[OnionMessageResponse],
+                               timeout: FiniteDuration) extends Command
   private case class Unsubscribe(pathId: ByteVector32) extends Command
   private case class WrappedMessage(finalPayload: FinalPayload, pathId: Option[ByteVector]) extends Command
   sealed trait OnionMessageResponse
   case object NoReply extends OnionMessageResponse
-  case class Response(payload: FinalPayload) extends OnionMessageResponse
+  case class Response(payload: FinalPayload, pathId: ByteVector32) extends OnionMessageResponse
   case class SendingStatus(status: MessageRelay.Status) extends OnionMessageResponse with Command
   // @formatter:on
 
@@ -53,58 +61,80 @@ object Postman {
 
       val relayMessageStatusAdapter = context.messageAdapter[MessageRelay.Status](SendingStatus)
 
+      // For messages expecting a reply, send reply or failure to send
       val subscribed = new mutable.HashMap[ByteVector32, ActorRef[OnionMessageResponse]]()
-      val sendStatusTo = new mutable.HashMap[ByteVector32, ActorRef[OnionMessageResponse]]()
-      val sendFailureTo = new mutable.HashMap[ByteVector32, ActorRef[OnionMessageResponse]]()
 
-      Behaviors.receiveMessagePartial {
+      // For messages not expecting a reply, send success or failure to send
+      val sendStatusTo = new mutable.HashMap[ByteVector32, ActorRef[OnionMessageResponse]]()
+
+      // For pairs or messages expecting one reply, send first reply or second failure
+      val messagePair = new mutable.HashMap[ByteVector32, (ByteVector32, ActorRef[OnionMessageResponse])]()
+
+      Behaviors.receiveMessage {
         case WrappedMessage(finalPayload, Some(pathId)) if pathId.length == 32 =>
-          subscribed.get(ByteVector32(pathId)) match {
-            case Some(ref) =>
-              subscribed -= ByteVector32(pathId)
-              ref ! Response(finalPayload)
-            case None => () // ignoring message with unknown pathId
+          val id = ByteVector32(pathId)
+          subscribed.get(id).foreach(ref => {
+            subscribed -= id
+            ref ! Response(finalPayload, id)
+          })
+          messagePair.get(id).foreach { case (otherId, ref) =>
+            messagePair -= id
+            messagePair -= otherId
+            ref ! Response(finalPayload, id)
           }
           Behaviors.same
         case WrappedMessage(_, _) =>
           // ignoring message with invalid or missing pathId
           Behaviors.same
-        case SendMessage(nextNodeId, message, None, ref, _) =>
+        case SendMessage(nextNodeId, message, None, ref, _) => // not expecting reply
           val messageId = randomBytes32()
           sendStatusTo += (messageId -> ref)
           switchboard ! Switchboard.RelayMessage(messageId, None, nextNodeId, message, MessageRelay.RelayAll, Some(relayMessageStatusAdapter))
           Behaviors.same
-        case SendMessage(nextNodeId, message, Some(pathId), ref, timeout) =>
-          val messageId = randomBytes32()
-          sendFailureTo += (messageId -> ref)
+        case SendMessage(nextNodeId, message, Some(pathId), ref, timeout) => // expecting reply
           subscribed += (pathId -> ref)
           context.scheduleOnce(timeout, context.self, Unsubscribe(pathId))
-          switchboard ! Switchboard.RelayMessage(messageId, None, nextNodeId, message, MessageRelay.RelayAll, Some(relayMessageStatusAdapter))
+          switchboard ! Switchboard.RelayMessage(pathId, None, nextNodeId, message, MessageRelay.RelayAll, Some(relayMessageStatusAdapter))
+          Behaviors.same
+        case SendMessageToBoth(nextNodeId1, message1, pathId1, nextNodeId2, message2, pathId2, ref, timeout) => // two messages expecting one reply
+          messagePair += (pathId1 -> (pathId2, ref))
+          messagePair += (pathId2 -> (pathId1, ref))
+          context.scheduleOnce(timeout, context.self, Unsubscribe(pathId1))
+          context.scheduleOnce(timeout, context.self, Unsubscribe(pathId2))
+          switchboard ! Switchboard.RelayMessage(pathId1, None, nextNodeId1, message1, MessageRelay.RelayAll, Some(relayMessageStatusAdapter))
+          switchboard ! Switchboard.RelayMessage(pathId2, None, nextNodeId2, message2, MessageRelay.RelayAll, Some(relayMessageStatusAdapter))
           Behaviors.same
         case Unsubscribe(pathId) =>
-          subscribed.get(pathId).foreach(_ ! NoReply)
-          subscribed -= pathId
+          subscribed.get(pathId).foreach(ref => {
+            subscribed -= pathId
+            ref ! NoReply
+          })
+          messagePair.get(pathId).foreach { case (otherId, ref) =>
+            messagePair -= pathId
+            messagePair -= otherId
+            ref ! NoReply
+          }
           Behaviors.same
         case status@SendingStatus(MessageRelay.Sent(messageId)) =>
-          sendStatusTo.get(messageId) match {
-            case Some(ref) =>
-              sendStatusTo -= messageId
-              ref ! status
-            case None => ()
-          }
+          sendStatusTo.get(messageId).foreach(ref => {
+            sendStatusTo -= messageId
+            ref ! status
+          })
           Behaviors.same
         case SendingStatus(status: MessageRelay.Failure) =>
-          sendStatusTo.get(status.messageId) match {
-            case Some(ref) =>
-              sendStatusTo -= status.messageId
-              ref ! SendingStatus(status)
-            case None => ()
-          }
-          sendFailureTo.get(status.messageId) match {
-            case Some(ref) =>
-              sendFailureTo -= status.messageId
-              ref ! SendingStatus(status)
-            case None => ()
+          sendStatusTo.get(status.messageId).foreach(ref => {
+            sendStatusTo -= status.messageId
+            ref ! SendingStatus(status)
+          })
+          subscribed.get(status.messageId).foreach(ref => {
+            subscribed -= status.messageId
+            ref ! SendingStatus(status)
+          })
+          messagePair.get(status.messageId).foreach { case (otherId, ref) =>
+            messagePair -= status.messageId
+            if (!messagePair.contains(otherId)) {
+              ref ! NoReply
+            }
           }
           Behaviors.same
       }

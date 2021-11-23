@@ -149,6 +149,8 @@ object OfferCodecs {
 
   private val paymentHash: Codec[PaymentHash] = variableSizeBytesLong(varintoverflow, bytes32).as[PaymentHash]
 
+  private val paymentSecret: Codec[PaymentSecret] = variableSizeBytesLong(varintoverflow, bytes32).as[PaymentSecret]
+
   private val relativeExpiry: Codec[RelativeExpiry] = variableSizeBytesLong(varintoverflow, tu32).as[RelativeExpiry]
 
   private val cltv: Codec[Cltv] = variableSizeBytesLong(varintoverflow, uint16).as[CltvExpiryDelta].as[Cltv]
@@ -184,6 +186,7 @@ object OfferCodecs {
     .typecase(UInt64(50), payerInfo)
     .typecase(UInt64(52), refundSignature)
     .typecase(UInt64(56), replaceInvoice)
+    .typecase(UInt64(58), paymentSecret)
     .typecase(UInt64(240), signature)
   ).complete
 

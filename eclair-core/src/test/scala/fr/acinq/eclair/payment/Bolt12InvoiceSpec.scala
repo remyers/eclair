@@ -17,7 +17,7 @@
 package fr.acinq.eclair.payment
 
 import fr.acinq.eclair.wire.protocol.Offers._
-import fr.acinq.eclair.{Features, MilliSatoshiLong, randomKey}
+import fr.acinq.eclair.{Features, MilliSatoshiLong, randomBytes32, randomKey}
 import org.scalatest.funsuite.AnyFunSuite
 import scodec.bits._
 
@@ -27,7 +27,7 @@ class Bolt12InvoiceSpec extends AnyFunSuite {
     val payerKey = randomKey()
     val offer = Offer(Some(10000 msat), "test offer", nodeKey.publicKey)
     val request = InvoiceRequest(offer, 10000 msat, 1, Features.empty, payerKey)
-    val invoice = Bolt12Invoice(offer, request, hex"013a9e", nodeKey)
+    val invoice = Bolt12Invoice(offer, request, hex"013a9e", randomBytes32(), nodeKey)
     assert(invoice.isValidFor(offer, request))
   }
 }

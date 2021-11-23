@@ -93,6 +93,8 @@ object Offers {
 
   case class PaymentHash(hash: ByteVector32) extends InvoiceTlv
 
+  case class PaymentSecret(secret: ByteVector32) extends InvoiceTlv
+
   case class RelativeExpiry(seconds: Long) extends InvoiceTlv
 
   case class Cltv(minFinalCltvExpiry: CltvExpiryDelta) extends InvoiceTlv
@@ -163,8 +165,9 @@ object Offers {
   }
 
   object Offer {
-    def apply(amount_opt: Option[MilliSatoshi], description: String, nodeId: PublicKey):Offer = {
+    def apply(amount_opt: Option[MilliSatoshi], description: String, nodeId: PublicKey, chain: ByteVector32 = Block.LivenetGenesisBlock.hash):Offer = {
       val tlvs: Seq[OfferTlv] = Seq(
+        if(chain == Block.LivenetGenesisBlock.hash) None else Some(Chains(Seq(chain))),
         amount_opt.map(Amount),
         Some(Description(description)),
         Some(NodeId(nodeId))).flatten
