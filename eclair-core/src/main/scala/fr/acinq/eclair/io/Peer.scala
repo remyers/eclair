@@ -16,7 +16,7 @@
 
 package fr.acinq.eclair.io
 
-import akka.actor.typed.scaladsl.adapter.ClassicActorRefOps
+import akka.actor.typed.scaladsl.adapter.{ClassicActorContextOps, ClassicActorRefOps}
 import akka.actor.{Actor, ActorContext, ActorRef, ExtendedActorSystem, FSM, OneForOneStrategy, PossiblyHarmful, Props, Status, SupervisorStrategy, Terminated, typed}
 import akka.event.Logging.MDC
 import akka.event.{BusLogging, DiagnosticLoggingAdapter}
@@ -73,7 +73,10 @@ class Peer(val nodeParams: NodeParams, remoteNodeId: PublicKey, wallet: OnChainA
 
   when(DISCONNECTED) {
     case Event(p: Peer.Connect, _) =>
-      reconnectionTask forward p
+      reconnectionTask match {
+        case Left(parallelReconnectionTask) => parallelReconnectionTask ! ParallelReconnectionTask.WrappedPeerConnect(p)
+        case Right(reconnectionTask) => reconnectionTask forward p
+      }
       stay()
 
     case Event(connectionReady: PeerConnection.ConnectionReady, d: DisconnectedData) =>
@@ -305,10 +308,19 @@ class Peer(val nodeParams: NodeParams, remoteNodeId: PublicKey, wallet: OnChainA
       stay()
   }
 
-  private val reconnectionTask = context.actorOf(ReconnectionTask.props(nodeParams, remoteNodeId), "reconnection-task")
+  private val reconnectionTask = if (nodeParams.parallelReconnect) {
+    Left(context.spawn(ParallelReconnectionTask(nodeParams, remoteNodeId), "reconnection-task"))
+  } else {
+    Right(context.actorOf(ReconnectionTask.props(nodeParams, remoteNodeId), "reconnection-task"))
+  }
 
   onTransition {
-    case _ -> (DISCONNECTED | CONNECTED) => reconnectionTask ! Peer.Transition(stateData, nextStateData)
+    case _ -> (DISCONNECTED | CONNECTED) =>
+      val peerTransition = Peer.Transition(stateData, nextStateData)
+      reconnectionTask match {
+      case Left(parallelReconnectionTask) => parallelReconnectionTask ! ParallelReconnectionTask.WrappedPeerTransition(peerTransition)
+      case Right(reconnectionTask) => reconnectionTask ! peerTransition
+    }
   }
 
   onTransition {

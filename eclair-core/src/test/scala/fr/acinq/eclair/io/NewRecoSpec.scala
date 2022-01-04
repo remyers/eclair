@@ -7,7 +7,7 @@ import org.scalatest.funsuite.AnyFunSuite
 
 import scala.concurrent.duration.DurationInt
 
-object RecoTask {
+object RecoTaskTest {
 
   // @formatter:off
   sealed trait Command
@@ -41,9 +41,9 @@ object Manager {
       Behaviors.receiveMessage {
         case Spawn =>
           context.log.info("spawning connection task")
-          context.spawnAnonymous(Behaviors.supervise(RecoTask.apply())
+          context.spawnAnonymous(Behaviors.supervise(RecoTaskTest.apply())
             .onFailure[RuntimeException](SupervisorStrategy
-              .restartWithBackoff(minBackoff = 1 second, maxBackoff = 30 seconds, randomFactor = 0.1)
+              .restartWithBackoff(minBackoff = 1 second, maxBackoff = 30 seconds, randomFactor = 0.5)
               .withResetBackoffAfter(10 minutes)
               .withLoggingEnabled(false)
             )
@@ -54,25 +54,13 @@ object Manager {
 
 }
 
-object Guardian {
-  def apply(): Behavior[NotUsed] =
-    Behaviors.setup { context =>
-      val manager = context.spawn(Manager(), "manager")
-      context.watch(manager)
-      manager ! Manager.Spawn
-
-      Behaviors.receiveSignal {
-        case (_, Terminated(_)) =>
-          Behaviors.stopped
-      }
-    }
-}
 
 class NewRecoSpec extends AnyFunSuite {
 
   test("new reconnection task") {
 
-    val system = ActorSystem(Guardian(), "system")
+    val system = ActorSystem(Manager(), "system")
+    system ! Manager.Spawn
     Thread.sleep(Long.MaxValue)
   }
 
