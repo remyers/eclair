@@ -19,7 +19,7 @@ package fr.acinq.eclair.payment
 import fr.acinq.bitcoin.Crypto.{PrivateKey, PublicKey}
 import fr.acinq.bitcoin.{Base58, Base58Check, Bech32, Block, ByteVector32, ByteVector64, Crypto}
 import fr.acinq.eclair.payment.PaymentRequest._
-import fr.acinq.eclair.{CltvExpiryDelta, FeatureSupport, Features, MilliSatoshi, MilliSatoshiLong, NodeParams, ShortChannelId, TimestampSecond, randomBytes32}
+import fr.acinq.eclair.{CltvExpiryDelta, Feature, FeatureSupport, Features, InvoiceFeature, MilliSatoshi, MilliSatoshiLong, NodeParams, ShortChannelId, TimestampSecond, randomBytes32}
 import scodec.bits.{BitVector, ByteOrdering, ByteVector}
 import scodec.codecs.{list, ubyte}
 import scodec.{Codec, Err}
@@ -368,6 +368,9 @@ object PaymentRequest {
     def apply(features: Int*): PaymentRequestFeatures = PaymentRequestFeatures(long2bits(features.foldLeft(0L) {
       case (current, feature) => current + (1L << feature)
     }))
+
+    def apply(features: Map[Feature with InvoiceFeature, FeatureSupport]): PaymentRequestFeatures =
+      apply(features.map { case (f, s) => f.supportBit(s) }.toSeq: _*)
   }
 
   object Codecs {

@@ -29,7 +29,7 @@ import fr.acinq.eclair.payment.Monitoring.{Metrics, Tags}
 import fr.acinq.eclair.payment.PaymentRequest.{ExtraHop, PaymentRequestFeatures}
 import fr.acinq.eclair.payment.{IncomingPaymentPacket, PaymentReceived, PaymentRequest}
 import fr.acinq.eclair.wire.protocol._
-import fr.acinq.eclair.{Features, Logs, MilliSatoshi, NodeParams, randomBytes32}
+import fr.acinq.eclair.{Feature, FeatureSupport, Features, InvoiceFeature, Logs, MilliSatoshi, NodeParams, randomBytes32}
 
 import scala.util.{Failure, Success, Try}
 
@@ -230,10 +230,10 @@ object MultiPartHandler {
               val paymentHash = Crypto.sha256(paymentPreimage)
               val expirySeconds = expirySeconds_opt.getOrElse(nodeParams.paymentRequestExpiry.toSeconds)
               val paymentMetadata = Some(ByteVector64.Zeroes.bytes)
-              val invoiceFeatures = {
-                val activatedInvoiceFeatures = nodeParams.features.invoiceFeatures().map { case (f, s) => f.supportBit(s) }.toSet
-                val allInvoiceFeatures = if (nodeParams.enableTrampolinePayment) activatedInvoiceFeatures + Features.TrampolinePayment.optional else activatedInvoiceFeatures
-                allInvoiceFeatures.toSeq
+              val invoiceFeatures: Map[Feature with InvoiceFeature, FeatureSupport] = {
+                val activatedInvoiceFeatures = nodeParams.features.invoiceFeatures()
+                val allInvoiceFeatures = if (nodeParams.enableTrampolinePayment) activatedInvoiceFeatures + (Features.TrampolinePayment -> FeatureSupport.Optional) else activatedInvoiceFeatures
+                allInvoiceFeatures
               }
               val paymentRequest = PaymentRequest(
                 nodeParams.chainHash,
@@ -246,7 +246,7 @@ object MultiPartHandler {
                 expirySeconds = Some(expirySeconds),
                 extraHops = extraHops,
                 paymentMetadata = paymentMetadata,
-                features = PaymentRequestFeatures(invoiceFeatures: _*)
+                features = PaymentRequestFeatures(invoiceFeatures)
               )
               context.log.debug("generated payment request={} from amount={}", PaymentRequest.write(paymentRequest), amount_opt)
               nodeParams.db.payments.addIncomingPayment(paymentRequest, paymentPreimage, paymentType)
