@@ -19,7 +19,7 @@ package fr.acinq.eclair.router
 import fr.acinq.bitcoin.Crypto.{PrivateKey, PublicKey, sha256, verifySignature}
 import fr.acinq.bitcoin.{ByteVector32, ByteVector64, Crypto, LexicographicalOrdering}
 import fr.acinq.eclair.wire.protocol._
-import fr.acinq.eclair.{CltvExpiryDelta, Features, MilliSatoshi, ShortChannelId, TimestampSecond, TimestampSecondLong, serializationResult}
+import fr.acinq.eclair.{CltvExpiryDelta, Feature, Features, MilliSatoshi, ShortChannelId, TimestampSecond, TimestampSecondLong, serializationResult}
 import scodec.bits.ByteVector
 import shapeless.HNil
 
@@ -76,7 +76,7 @@ object Announcements {
       case address@(_: Tor2) => (3, address)
       case address@(_: Tor3) => (4, address)
     }.sortBy(_._1).map(_._2)
-    val nodeAnnouncementFeatures = features.nodeAnnouncementFeatures()
+    val nodeAnnouncementFeatures = Features.fromScopedFeature(features.nodeAnnouncementFeatures())
     val witness = nodeAnnouncementWitnessEncode(timestamp, nodeSecret.publicKey, color, alias, nodeAnnouncementFeatures, sortedAddresses, TlvStream.empty)
     val sig = Crypto.sign(witness, nodeSecret)
     NodeAnnouncement(

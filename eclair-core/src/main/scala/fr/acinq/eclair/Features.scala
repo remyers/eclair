@@ -81,11 +81,11 @@ case class Features(activated: Map[Feature, FeatureSupport], unknown: Set[Unknow
     unknownFeaturesOk && knownFeaturesOk
   }
 
-  def initFeatures(): Features = Features(activated.collect { case (f: Feature with InitFeature, support) => (f: Feature, support) }, unknown)
+  def initFeatures(): Map[Feature with InitFeature, FeatureSupport] = activated.collect { case (f: Feature with InitFeature, support) => (f, support) }
 
-  def nodeAnnouncementFeatures(): Features = Features(activated.collect { case (f: Feature with NodeFeature, support) => (f: Feature, support) }, unknown)
+  def nodeAnnouncementFeatures(): Map[Feature with NodeFeature, FeatureSupport] = activated.collect { case (f: Feature with NodeFeature, support) => (f, support) }
 
-  def invoiceFeatures(): Features = Features(activated.collect { case (f: Feature with InvoiceFeature, support) => (f: Feature, support) }, unknown)
+  def invoiceFeatures(): Map[Feature with InvoiceFeature, FeatureSupport] = activated.collect { case (f: Feature with InvoiceFeature, support) => (f, support) }
 
   def toByteVector: ByteVector = {
     val activatedFeatureBytes = toByteVectorFromIndex(activated.map { case (feature, support) => feature.supportBit(support) }.toSet)
@@ -127,6 +127,10 @@ object Features {
       activated = all.collect { case Right((feature, support)) => feature -> support }.toMap,
       unknown = all.collect { case Left(inf) => inf }.toSet
     )
+  }
+
+  def fromScopedFeature[S <: FeatureScope](activated: Map[Feature with S, FeatureSupport], unknown: Set[UnknownFeature] = Set.empty): Features = {
+    Features(activated.collect { case (k, v) => (k: Feature, v) }, unknown)
   }
 
   /** expects to have a top level config block named "features" */
