@@ -16,7 +16,6 @@
 
 package fr.acinq.eclair.wire.protocol
 
-import fr.acinq.bitcoin.Bech32.Bech32Encoding
 import fr.acinq.bitcoin.{Bech32, ByteVector32}
 import fr.acinq.eclair.crypto.Sphinx.RouteBlinding.{BlindedNode, BlindedRoute}
 import fr.acinq.eclair.payment.Bolt12Invoice
@@ -214,11 +213,12 @@ object OfferCodecs {
   })
 
   def encodeBech32[A](codec: Codec[A], a: A): Attempt[String] = {
-    codec.encode(a).map(bits => Bech32.encode("lno", Bech32.eight2five(bits.bytes.toArray), Bech32Encoding))
+    //codec.encode(a).map(bits => Bech32.encode("lno", Bech32.eight2five(bits.bytes.toArray), Bech32Encoding))
+    ???
   }
 
   def decodeBech32[A](codec: Codec[A], s: String): Attempt[A] = {
-    val (hrp, data, _) = Bech32.decode(s)
+    val (hrp, data) = Bech32.decode(s)
     if (hrp != "lno") {
       Attempt.failure(Err("Not a LN offer"))
     } else {

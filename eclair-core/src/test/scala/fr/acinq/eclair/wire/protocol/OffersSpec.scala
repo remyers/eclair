@@ -16,7 +16,7 @@
 
 package fr.acinq.eclair.wire.protocol
 
-import fr.acinq.bitcoin.{ByteVector32, ByteVector64, Crypto}
+import fr.acinq.bitcoin.{ByteVector32, ByteVector64}
 import fr.acinq.eclair.{MilliSatoshi, randomBytes32, randomKey}
 import fr.acinq.eclair.wire.protocol.OfferCodecs.invoiceRequestTlvCodec
 import fr.acinq.eclair.wire.protocol.Offers.{Amount, InvoiceRequestTlv, OfferId, PayerKey, Signature, rootHash}
