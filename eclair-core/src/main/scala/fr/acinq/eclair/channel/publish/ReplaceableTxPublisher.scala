@@ -16,7 +16,7 @@
 
 package fr.acinq.eclair.channel.publish
 
-import akka.actor.typed.scaladsl.{ActorContext, Behaviors, TimerScheduler}
+import akka.actor.typed.scaladsl.{ActorContext, Behaviors, StashBuffer, TimerScheduler}
 import akka.actor.typed.{ActorRef, Behavior}
 import fr.acinq.bitcoin.{OutPoint, Transaction}
 import fr.acinq.eclair.blockchain.bitcoind.ZmqWatcher
@@ -62,11 +62,13 @@ object ReplaceableTxPublisher {
 
   def apply(nodeParams: NodeParams, bitcoinClient: BitcoinCoreClient, watcher: ActorRef[ZmqWatcher.Command], loggingInfo: TxPublishLogContext): Behavior[Command] = {
     Behaviors.setup { context =>
-      Behaviors.withTimers { timers =>
-        Behaviors.withMdc(loggingInfo.mdc()) {
-          Behaviors.receiveMessagePartial {
-            case Publish(replyTo, cmd) => new ReplaceableTxPublisher(nodeParams, replyTo, cmd, bitcoinClient, watcher, context, timers, loggingInfo).checkPreconditions()
-            case Stop => Behaviors.stopped
+      Behaviors.withStash(100) { stash =>
+        Behaviors.withTimers { timers =>
+          Behaviors.withMdc(loggingInfo.mdc()) {
+            Behaviors.receiveMessagePartial {
+              case Publish(replyTo, cmd) => new ReplaceableTxPublisher(nodeParams, replyTo, cmd, bitcoinClient, watcher, context, stash, timers, loggingInfo).checkPreconditions()
+              case Stop => Behaviors.stopped
+            }
           }
         }
       }
@@ -97,6 +99,7 @@ private class ReplaceableTxPublisher(nodeParams: NodeParams,
                                      bitcoinClient: BitcoinCoreClient,
                                      watcher: ActorRef[ZmqWatcher.Command],
                                      context: ActorContext[ReplaceableTxPublisher.Command],
+                                     stash: StashBuffer[ReplaceableTxPublisher.Command],
                                      timers: TimerScheduler[ReplaceableTxPublisher.Command],
                                      loggingInfo: TxPublishLogContext)(implicit ec: ExecutionContext = ExecutionContext.Implicits.global) {
 
@@ -145,13 +148,11 @@ private class ReplaceableTxPublisher(nodeParams: NodeParams,
           case ReplaceableTxFunder.TransactionReady(tx) =>
             val txMonitor = context.spawn(MempoolTxMonitor(nodeParams, bitcoinClient, loggingInfo), "mempool-tx-monitor")
             txMonitor ! MempoolTxMonitor.Publish(context.messageAdapter[MempoolTxMonitor.TxResult](WrappedTxResult), tx.signedTx, cmd.input, cmd.desc, tx.fee)
-            wait(txMonitor, tx)
+            stash.unstashAll(wait(txMonitor, tx))
           case ReplaceableTxFunder.FundingFailed(reason) => sendResult(TxPublisher.TxRejected(loggingInfo.id, cmd, reason))
         }
-      case Stop =>
-        // We can't stop right now, the child actor is currently funding the transaction and will send its result soon.
-        // We just wait for the funding process to finish before stopping (in the next state).
-        timers.startSingleTimer(Stop, 1 second)
+      case other: Command =>
+        stash.stash(other)
         Behaviors.same
     }
   }
@@ -201,21 +202,16 @@ private class ReplaceableTxPublisher(nodeParams: NodeParams,
     txFunder ! ReplaceableTxFunder.FundTransaction(context.messageAdapter[ReplaceableTxFunder.FundingResult](WrappedFundingResult), cmd, Left(previousTx), targetFeerate)
     Behaviors.receiveMessagePartial {
       case WrappedFundingResult(result) =>
-        result match {
-          case success: ReplaceableTxFunder.TransactionReady => publishReplacement(previousTx, previousTxMonitor, success.fundedTx)
-          case ReplaceableTxFunder.FundingFailed(_) =>
-            log.warn("could not fund {} replacement transaction (target feerate={})", cmd.desc, targetFeerate)
-            wait(previousTxMonitor, previousTx)
+        stash.unstashAll {
+          result match {
+            case success: ReplaceableTxFunder.TransactionReady => publishReplacement(previousTx, previousTxMonitor, success.fundedTx)
+            case ReplaceableTxFunder.FundingFailed(_) =>
+              log.warn("could not fund {} replacement transaction (target feerate={})", cmd.desc, targetFeerate)
+              wait(previousTxMonitor, previousTx)
+          }
         }
-      case txResult: WrappedTxResult =>
-        // This is the result of the previous publishing attempt.
-        // We don't need to handle it now that we're in the middle of funding, we can defer it to the next state.
-        timers.startSingleTimer(txResult, 1 second)
-        Behaviors.same
-      case Stop =>
-        // We can't stop right away, because the child actor may need to unlock utxos first.
-        // We just wait for the funding process to finish before stopping.
-        timers.startSingleTimer(Stop, 1 second)
+      case other: Command =>
+        stash.stash(other)
         Behaviors.same
     }
   }
@@ -276,15 +272,8 @@ private class ReplaceableTxPublisher(nodeParams: NodeParams,
         // Now that we've cleaned up the failed transaction, we can go back to waiting for the current mempool transaction
         // or bump it if it doesn't confirm fast enough either.
         wait(txMonitor, mempoolTx)
-      case txResult: WrappedTxResult =>
-        // This is the result of the current mempool tx: we will handle this command once we're back in the waiting
-        // state for this transaction.
-        timers.startSingleTimer(txResult, 1 second)
-        Behaviors.same
-      case Stop =>
-        // We don't stop right away, because we're cleaning up the failed transaction.
-        // This shouldn't take long so we'll handle this command once we're back in the waiting state.
-        timers.startSingleTimer(Stop, 1 second)
+      case other: Command =>
+        stash.stash(other)
         Behaviors.same
     }
   }
