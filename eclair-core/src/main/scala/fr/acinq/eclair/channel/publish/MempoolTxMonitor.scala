@@ -56,7 +56,7 @@ object MempoolTxMonitor {
 
   // @formatter:off
   /** Once the transaction is published, we notify the sender of its confirmation status at every block. */
-  sealed trait TxResult
+  sealed trait TxResult { def txid: ByteVector32 }
   sealed trait IntermediateTxResult extends TxResult
   /** The transaction is still unconfirmed and available in the mempool. */
   case class TxInMempool(txid: ByteVector32, currentBlockCount: Long) extends IntermediateTxResult
@@ -64,7 +64,7 @@ object MempoolTxMonitor {
   case class TxRecentlyConfirmed(txid: ByteVector32, confirmations: Int) extends IntermediateTxResult
   sealed trait FinalTxResult extends TxResult
   /** The transaction is confirmed and has reached min depth. */
-  case class TxDeeplyBuried(tx: Transaction) extends FinalTxResult
+  case class TxDeeplyBuried(tx: Transaction) extends FinalTxResult { override def txid: ByteVector32 = tx.txid }
   /** The transaction has been evicted from the mempool. */
   case class TxRejected(txid: ByteVector32, reason: TxPublisher.TxRejectedReason) extends FinalTxResult
   // @formatter:on
@@ -150,20 +150,17 @@ private class MempoolTxMonitor(nodeParams: NodeParams,
         }
         Behaviors.same
       case TxConfirmations(confirmations, currentBlockCount) =>
-        if (confirmations == 1) {
-          log.info("txid={} has been confirmed, waiting to reach min depth", cmd.tx.txid)
-        }
-        if (nodeParams.minDepthBlocks <= confirmations) {
+        if (confirmations == 0) {
+          cmd.replyTo ! TxInMempool(cmd.tx.txid, currentBlockCount)
+          Behaviors.same
+        } else if (confirmations < nodeParams.minDepthBlocks) {
+          log.info("txid={} has {} confirmations, waiting to reach min depth", cmd.tx.txid, confirmations)
+          cmd.replyTo ! TxRecentlyConfirmed(cmd.tx.txid, confirmations)
+          Behaviors.same
+        } else {
           log.info("txid={} has reached min depth", cmd.tx.txid)
           context.system.eventStream ! EventStream.Publish(TransactionConfirmed(loggingInfo.channelId_opt.getOrElse(ByteVector32.Zeroes), loggingInfo.remoteNodeId, cmd.tx))
           sendFinalResult(TxDeeplyBuried(cmd.tx), Some(messageAdapter))
-        } else {
-          if (confirmations == 0) {
-            cmd.replyTo ! TxInMempool(cmd.tx.txid, currentBlockCount)
-          } else {
-            cmd.replyTo ! TxRecentlyConfirmed(cmd.tx.txid, confirmations)
-          }
-          Behaviors.same
         }
       case TxNotFound =>
         log.warn("txid={} has been evicted from the mempool", cmd.tx.txid)

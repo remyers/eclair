@@ -145,7 +145,7 @@ private class ReplaceableTxPublisher(nodeParams: NodeParams,
           case ReplaceableTxFunder.TransactionReady(tx) =>
             val txMonitor = context.spawn(MempoolTxMonitor(nodeParams, bitcoinClient, loggingInfo), "mempool-tx-monitor")
             txMonitor ! MempoolTxMonitor.Publish(context.messageAdapter[MempoolTxMonitor.TxResult](WrappedTxResult), tx.signedTx, cmd.input, cmd.desc, tx.fee)
-            wait(txMonitor, tx)
+            wait(Seq(tx))
           case ReplaceableTxFunder.FundingFailed(reason) => sendResult(TxPublisher.TxRejected(loggingInfo.id, cmd, reason))
         }
       case Stop =>
@@ -158,25 +158,43 @@ private class ReplaceableTxPublisher(nodeParams: NodeParams,
 
   // Wait for our transaction to be confirmed or rejected from the mempool.
   // If we get close to the confirmation target and our transaction is stuck in the mempool, we will initiate an RBF attempt.
-  def wait(txMonitor: ActorRef[MempoolTxMonitor.Command], tx: FundedTx): Behavior[Command] = {
+  def wait(txs: Seq[FundedTx]): Behavior[Command] = {
+    require(txs.nonEmpty, "there is always one tx") // could be "if txs.isEmpty then stop" instead ?
     Behaviors.receiveMessagePartial {
       case WrappedTxResult(txResult) =>
         txResult match {
-          case MempoolTxMonitor.TxInMempool(_, currentBlockCount) =>
-            // We avoid a herd effect whenever we fee bump transactions.
-            timers.startSingleTimer(CheckFeeKey, CheckFee(currentBlockCount), (1 + Random.nextLong(nodeParams.maxTxPublishRetryDelay.toMillis)).millis)
-            Behaviors.same
+          case MempoolTxMonitor.TxInMempool(txid, currentBlockCount) =>
+            if (txid == txs.last.signedTx.txid) {
+              // We avoid a herd effect whenever we fee bump transactions.
+              timers.startSingleTimer(CheckFeeKey, CheckFee(currentBlockCount), (1 + Random.nextLong(nodeParams.maxTxPublishRetryDelay.toMillis)).millis)
+              Behaviors.same
+            } else {
+              // this is for an old tx: ignore
+              Behaviors.same
+            }
           case MempoolTxMonitor.TxRecentlyConfirmed(_, _) => Behaviors.same // just wait for the tx to be deeply buried
-          case MempoolTxMonitor.TxDeeplyBuried(confirmedTx) => sendResult(TxPublisher.TxConfirmed(cmd, confirmedTx))
-          case MempoolTxMonitor.TxRejected(_, reason) =>
-            replyTo ! TxPublisher.TxRejected(loggingInfo.id, cmd, reason)
-            // We wait for our parent to stop us: when that happens we will unlock utxos.
-            Behaviors.same
+          case MempoolTxMonitor.TxDeeplyBuried(confirmedTx) =>
+            replyTo ! TxPublisher.TxConfirmed(cmd, confirmedTx)
+            unlockAndStop(cmd.input, txs.map(_.signedTx))
+          case MempoolTxMonitor.TxRejected(txid, reason) =>
+            val failedTx = txs.find(_.signedTx.txid == txid).get.signedTx
+            if (txs.size == 1) {
+              replyTo ! TxPublisher.TxRejected(loggingInfo.id, cmd, reason)
+              // We wait for our parent to stop us: when that happens we will unlock utxos.
+              Behaviors.same
+            } else if (txid == txs.last.signedTx.txid) {
+              log.warn("{} transaction paying more fees (txid={}) failed to replace previous transaction", cmd.desc, txid)
+              cleanUpFailedTxAndWait(failedTx, txs.filterNot(_.signedTx.txid == txid))
+            } else {
+              log.info("previous {} probably replaced by new transaction paying more fees (txid={})", cmd.desc, txs.last.signedTx.txid)
+              cleanUpFailedTxAndWait(failedTx, txs.filterNot(_.signedTx.txid == txid))
+            }
         }
       case CheckFee(currentBlockCount) =>
         // We make sure we increase the fees by at least 20% as we get closer to the confirmation target.
         val bumpRatio = 1.2
         val currentFeerate = getFeerate(nodeParams.onChainFeeConf.feeEstimator, cmd.txInfo.confirmBefore, BlockHeight(currentBlockCount))
+        val tx = txs.last
         if (cmd.txInfo.confirmBefore.toLong <= currentBlockCount + 6) {
           log.debug("{} confirmation target is close (in {} blocks): bumping fees", cmd.desc, cmd.txInfo.confirmBefore.toLong - currentBlockCount)
           context.self ! BumpFee(currentFeerate.max(tx.feerate * bumpRatio))
@@ -187,25 +205,31 @@ private class ReplaceableTxPublisher(nodeParams: NodeParams,
           log.debug("{} confirmation target is in {} blocks: no need to bump fees", cmd.desc, cmd.txInfo.confirmBefore.toLong - currentBlockCount)
         }
         Behaviors.same
-      case BumpFee(targetFeerate) => fundReplacement(targetFeerate, txMonitor, tx)
-      case Stop =>
-        txMonitor ! MempoolTxMonitor.Stop
-        unlockAndStop(cmd.input, Seq(tx.signedTx))
+      case BumpFee(targetFeerate) => fundReplacement(targetFeerate, txs)
+      case Stop => unlockAndStop(cmd.input, txs.map(_.signedTx))
     }
   }
 
   // Fund a replacement transaction because our previous attempt seems to be stuck in the mempool.
-  def fundReplacement(targetFeerate: FeeratePerKw, previousTxMonitor: ActorRef[MempoolTxMonitor.Command], previousTx: FundedTx): Behavior[Command] = {
+  def fundReplacement(targetFeerate: FeeratePerKw, txs: Seq[FundedTx]): Behavior[Command] = {
+    val previousTx = txs.last
     log.info("bumping {} fees: previous feerate={}, next feerate={}", cmd.desc, previousTx.feerate, targetFeerate)
     val txFunder = context.spawn(ReplaceableTxFunder(nodeParams, bitcoinClient, loggingInfo), "tx-funder-rbf")
     txFunder ! ReplaceableTxFunder.FundTransaction(context.messageAdapter[ReplaceableTxFunder.FundingResult](WrappedFundingResult), cmd, Left(previousTx), targetFeerate)
     Behaviors.receiveMessagePartial {
       case WrappedFundingResult(result) =>
         result match {
-          case success: ReplaceableTxFunder.TransactionReady => publishReplacement(previousTx, previousTxMonitor, success.fundedTx)
+          case success: ReplaceableTxFunder.TransactionReady =>
+            // Publish an RBF attempt. We then have two concurrent transactions: the previous one and the updated one.
+            // Only one of them can be in the mempool, so we wait for the other to be rejected. Once that's done, we're back to a
+            // situation where we have one transaction in the mempool and wait for it to confirm.
+            val bumpedTx = success.fundedTx
+            val txMonitor = context.spawn(MempoolTxMonitor(nodeParams, bitcoinClient, loggingInfo), s"mempool-tx-monitor-rbf-${bumpedTx.signedTx.txid}")
+            txMonitor ! MempoolTxMonitor.Publish(context.messageAdapter[MempoolTxMonitor.TxResult](WrappedTxResult), bumpedTx.signedTx, cmd.input, cmd.desc, bumpedTx.fee)
+            wait(txs :+ bumpedTx)
           case ReplaceableTxFunder.FundingFailed(_) =>
-            log.warn("could not fund {} replacement transaction (target feerate={})", cmd.desc, targetFeerate)
-            wait(previousTxMonitor, previousTx)
+            log.warn("could not fund {} replacement transaction", cmd.desc)
+            wait(txs)
         }
       case txResult: WrappedTxResult =>
         // This is the result of the previous publishing attempt.
@@ -220,51 +244,12 @@ private class ReplaceableTxPublisher(nodeParams: NodeParams,
     }
   }
 
-  // Publish an RBF attempt. We then have two concurrent transactions: the previous one and the updated one.
-  // Only one of them can be in the mempool, so we wait for the other to be rejected. Once that's done, we're back to a
-  // situation where we have one transaction in the mempool and wait for it to confirm.
-  def publishReplacement(previousTx: FundedTx, previousTxMonitor: ActorRef[MempoolTxMonitor.Command], bumpedTx: FundedTx): Behavior[Command] = {
-    val txMonitor = context.spawn(MempoolTxMonitor(nodeParams, bitcoinClient, loggingInfo), s"mempool-tx-monitor-rbf-${bumpedTx.signedTx.txid}")
-    txMonitor ! MempoolTxMonitor.Publish(context.messageAdapter[MempoolTxMonitor.TxResult](WrappedTxResult), bumpedTx.signedTx, cmd.input, cmd.desc, bumpedTx.fee)
-    Behaviors.receiveMessagePartial {
-      case WrappedTxResult(txResult) =>
-        txResult match {
-          case MempoolTxMonitor.TxDeeplyBuried(confirmedTx) =>
-            // Since our transactions conflict, we should always receive a failure from the evicted transaction before
-            // one of them confirms: this case should not happen, so we don't bother unlocking utxos.
-            log.warn("{} was confirmed while we're publishing an RBF attempt", cmd.desc)
-            sendResult(TxPublisher.TxConfirmed(cmd, confirmedTx))
-          case MempoolTxMonitor.TxRejected(txid, _) =>
-            if (txid == bumpedTx.signedTx.txid) {
-              log.warn("{} transaction paying more fees (txid={}) failed to replace previous transaction", cmd.desc, txid)
-              cleanUpFailedTxAndWait(bumpedTx.signedTx, previousTxMonitor, previousTx)
-            } else {
-              log.info("previous {} replaced by new transaction paying more fees (txid={})", cmd.desc, bumpedTx.signedTx.txid)
-              cleanUpFailedTxAndWait(previousTx.signedTx, txMonitor, bumpedTx)
-            }
-          case _: MempoolTxMonitor.IntermediateTxResult =>
-            // If a new block is found before our replacement transaction reaches the MempoolTxMonitor, we may receive
-            // an intermediate result for the previous transaction. We want to handle this event once we're back in the
-            // waiting state, because we may want to fee-bump even more aggressively if we're getting too close to the
-            // confirmation target.
-            timers.startSingleTimer(WrappedTxResult(txResult), 1 second)
-            Behaviors.same
-        }
-      case Stop =>
-        previousTxMonitor ! MempoolTxMonitor.Stop
-        txMonitor ! MempoolTxMonitor.Stop
-        // We don't know yet which transaction won, so we try abandoning both and unlocking their utxos.
-        // One of the calls will fail (for the transaction that is in the mempool), but we will simply ignore that failure.
-        unlockAndStop(cmd.input, Seq(previousTx.signedTx, bumpedTx.signedTx))
-    }
-  }
-
   // Clean up the failed transaction attempt. Once that's done, go back to the waiting state with the new transaction.
-  def cleanUpFailedTxAndWait(failedTx: Transaction, txMonitor: ActorRef[MempoolTxMonitor.Command], mempoolTx: FundedTx): Behavior[Command] = {
+  def cleanUpFailedTxAndWait(failedTx: Transaction, mempoolTxs: Seq[FundedTx]): Behavior[Command] = {
     context.pipeToSelf(bitcoinClient.abandonTransaction(failedTx.txid))(_ => UnlockUtxos)
     Behaviors.receiveMessagePartial {
       case UnlockUtxos =>
-        val toUnlock = failedTx.txIn.map(_.outPoint).toSet -- mempoolTx.signedTx.txIn.map(_.outPoint).toSet
+        val toUnlock = failedTx.txIn.map(_.outPoint).toSet -- mempoolTxs.flatMap(_.signedTx.txIn).map(_.outPoint).toSet
         if (toUnlock.isEmpty) {
           context.self ! UtxosUnlocked
         } else {
@@ -275,7 +260,7 @@ private class ReplaceableTxPublisher(nodeParams: NodeParams,
       case UtxosUnlocked =>
         // Now that we've cleaned up the failed transaction, we can go back to waiting for the current mempool transaction
         // or bump it if it doesn't confirm fast enough either.
-        wait(txMonitor, mempoolTx)
+        wait(mempoolTxs)
       case txResult: WrappedTxResult =>
         // This is the result of the current mempool tx: we will handle this command once we're back in the waiting
         // state for this transaction.
