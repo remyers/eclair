@@ -1066,7 +1066,7 @@ object Helpers {
      * We need to handle potentially duplicate HTLCs (same amount and expiry): this function will use a deterministic
      * ordering of transactions and HTLCs to handle this.
      */
-    private def findTimedOutHtlc(tx: Transaction, paymentHash160: ByteVector, htlcs: Seq[UpdateAddHtlc], timeoutTxs: Seq[Transaction], extractPaymentHash: PartialFunction[ScriptWitness, ByteVector])(implicit log: LoggingAdapter): Option[UpdateAddHtlc] = {
+    private def matchTimeoutHtlcs(tx: Transaction, paymentHash160: ByteVector, htlcs: Seq[UpdateAddHtlc], timeoutTxs: Seq[Transaction], extractPaymentHash: PartialFunction[ScriptWitness, ByteVector])(implicit log: LoggingAdapter): Seq[(UpdateAddHtlc, Transaction)] = {
       // We use a deterministic ordering to match HTLCs to their corresponding timeout tx.
       // We don't match on the expected amounts because this is error-prone: computing the correct weight of a timeout tx
       // is hard because signatures can be either 71, 72 or 73 bytes long (ECDSA DER encoding).
@@ -1081,12 +1081,21 @@ object Helpers {
       if (matchingTxs.size != matchingHtlcs.size) {
         log.error(s"some htlcs don't have a corresponding timeout transaction: tx=$tx, htlcs=$matchingHtlcs, timeout-txs=$matchingTxs")
       }
-      matchingHtlcs.zip(matchingTxs).collectFirst {
+      matchingHtlcs.zip(matchingTxs)
+    }
+
+    private def findTimedOutHtlcFromHtlcTimeout(tx: Transaction, paymentHash160: ByteVector, htlcs: Seq[UpdateAddHtlc], htlcTimeoutTxs: Seq[HtlcTimeoutTx])(implicit log: LoggingAdapter): Option[UpdateAddHtlc] = {
+      matchTimeoutHtlcs(tx, paymentHash160, htlcs, htlcTimeoutTxs.map(_.tx), Scripts.extractPaymentHashFromHtlcTimeout).collectFirst {
         // HTLC transactions cannot change when anchor outputs is not used, so we could just check that the txids match.
         // But claim-htlc transactions can be updated to pay more or less fees by changing the output amount, so we cannot
         // rely on txid equality for them.
         // We instead check that the mempool transaction spends exactly the same inputs and sends the funds to exactly
         // the same addresses as our transaction.
+        case (add, timeoutTx) if timeoutTx.txIn.map(_.outPoint).toSet == tx.txIn.map(_.outPoint).toSet && timeoutTx.txOut.map(_.publicKeyScript).toSet == tx.txOut.map(_.publicKeyScript).toSet => add
+      }
+    }
+    private def findTimedOutHtlcFromClaimHtlcTimeout(tx: Transaction, paymentHash160: ByteVector, htlcs: Seq[UpdateAddHtlc], claimHtlcTimeoutTxs: Seq[ClaimHtlcTimeoutTx])(implicit log: LoggingAdapter): Option[UpdateAddHtlc] = {
+      matchTimeoutHtlcs(tx, paymentHash160, htlcs, claimHtlcTimeoutTxs.map(_.tx), Scripts.extractPaymentHashFromClaimHtlcTimeout).collectFirst {
         case (add, timeoutTx) if timeoutTx.txIn.map(_.outPoint).toSet == tx.txIn.map(_.outPoint).toSet && timeoutTx.txOut.map(_.publicKeyScript).toSet == tx.txOut.map(_.publicKeyScript).toSet => add
       }
     }
@@ -1113,8 +1122,8 @@ object Helpers {
             .collect(Scripts.extractPaymentHashFromHtlcTimeout)
             .flatMap { paymentHash160 =>
               log.info(s"htlc-timeout tx for paymentHash160=${paymentHash160.toHex} expiry=${tx.lockTime} has been confirmed (tx=$tx)")
-              val timeoutTxs = localCommitPublished.htlcTxs.values.collect { case Some(HtlcTimeoutTx(_, tx, _, _)) => tx }.toSeq
-              findTimedOutHtlc(tx, paymentHash160, untrimmedHtlcs, timeoutTxs, Scripts.extractPaymentHashFromHtlcTimeout)
+              val timeoutTxs = localCommitPublished.htlcTxs.values.collect { case Some(htlcTimeout: HtlcTimeoutTx) => htlcTimeout }.toSeq
+              findTimedOutHtlcFromHtlcTimeout(tx, paymentHash160, untrimmedHtlcs, timeoutTxs)
             }.toSet
         } else {
           tx.txIn.flatMap(txIn => localCommitPublished.htlcTxs.get(txIn.outPoint) match {
@@ -1155,8 +1164,8 @@ object Helpers {
             .collect(Scripts.extractPaymentHashFromClaimHtlcTimeout)
             .flatMap { paymentHash160 =>
               log.info(s"claim-htlc-timeout tx for paymentHash160=${paymentHash160.toHex} expiry=${tx.lockTime} has been confirmed (tx=$tx)")
-              val timeoutTxs = remoteCommitPublished.claimHtlcTxs.values.collect { case Some(ClaimHtlcTimeoutTx(_, tx, _, _)) => tx }.toSeq
-              findTimedOutHtlc(tx, paymentHash160, untrimmedHtlcs, timeoutTxs, Scripts.extractPaymentHashFromClaimHtlcTimeout)
+              val timeoutTxs = remoteCommitPublished.claimHtlcTxs.values.collect { case Some(claimHtlcTimeout: ClaimHtlcTimeoutTx) => claimHtlcTimeout }.toSeq
+              findTimedOutHtlcFromClaimHtlcTimeout(tx, paymentHash160, untrimmedHtlcs, timeoutTxs)
             }.toSet
         } else {
           tx.txIn.flatMap(txIn => remoteCommitPublished.claimHtlcTxs.get(txIn.outPoint) match {
