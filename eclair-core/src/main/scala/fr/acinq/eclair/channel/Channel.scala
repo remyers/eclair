@@ -22,7 +22,7 @@ import akka.actor.{Actor, ActorContext, ActorRef, FSM, OneForOneStrategy, Possib
 import akka.event.Logging.MDC
 import akka.pattern.pipe
 import fr.acinq.bitcoinscala.Crypto.{PrivateKey, PublicKey}
-import fr.acinq.bitcoinscala.{ByteVector32, OutPoint, Satoshi, SatoshiLong, Script, Transaction}
+import fr.acinq.bitcoinscala.{ByteVector32, KotlinUtils, OutPoint, Satoshi, SatoshiLong, Script, Transaction}
 import fr.acinq.bitcoin.ScriptFlags
 import fr.acinq.eclair.Logs.LogCategory
 import fr.acinq.eclair.NotificationsLogger.NotifyNodeOperator
@@ -442,7 +442,7 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder, remo
           log.debug("remote params: {}", remoteParams)
           val localFundingPubkey = keyManager.fundingPublicKey(localParams.fundingKeyPath)
           val fundingPubkeyScript = Script.write(Script.pay2wsh(Scripts.multiSig2of2(localFundingPubkey.publicKey, remoteParams.fundingPubKey)))
-          wallet.makeFundingTx(fundingPubkeyScript, fundingSatoshis, fundingTxFeeratePerKw).pipeTo(self)
+          wallet.makeFundingTx(nodeParams.chainHash, localFundingPubkey, remoteParams.fundingPubKey, fundingSatoshis, fundingTxFeeratePerKw).pipeTo(self)
           goto(WAIT_FOR_FUNDING_INTERNAL) using DATA_WAIT_FOR_FUNDING_INTERNAL(temporaryChannelId, localParams, remoteParams, fundingSatoshis, pushMsat, initialFeeratePerKw, accept.firstPerCommitmentPoint, channelConfig, channelFeatures, open)
       }
 
@@ -464,7 +464,8 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder, remo
   })
 
   when(WAIT_FOR_FUNDING_INTERNAL)(handleExceptions {
-    case Event(MakeFundingTxResponse(fundingTx, fundingTxOutputIndex, fundingTxFee), d@DATA_WAIT_FOR_FUNDING_INTERNAL(temporaryChannelId, localParams, remoteParams, fundingAmount, pushMsat, initialFeeratePerKw, remoteFirstPerCommitmentPoint, channelConfig, channelFeatures, open)) =>
+    case Event(MakeFundingTxResponse(psbt, fundingTxOutputIndex, fundingTxFee), d@DATA_WAIT_FOR_FUNDING_INTERNAL(temporaryChannelId, localParams, remoteParams, fundingAmount, pushMsat, initialFeeratePerKw, remoteFirstPerCommitmentPoint, channelConfig, channelFeatures, open)) =>
+      val fundingTx = KotlinUtils.kmp2scala(psbt.extract().getRight)
       // let's create the first commitment tx that spends the yet uncommitted funding tx
       Funding.makeFirstCommitTxs(keyManager, channelConfig, channelFeatures, temporaryChannelId, localParams, remoteParams, fundingAmount, pushMsat, initialFeeratePerKw, fundingTx.hash, fundingTxOutputIndex, remoteFirstPerCommitmentPoint) match {
         case Left(ex) => handleLocalError(ex, d, None)
@@ -1607,10 +1608,10 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder, remo
       log.info("shutting down")
       stop(FSM.Normal)
 
-    case Event(MakeFundingTxResponse(fundingTx, _, _), _) =>
+    case Event(MakeFundingTxResponse(psbt, _, _), _) =>
       // this may happen if connection is lost, or remote sends an error while we were waiting for the funding tx to be created by our wallet
       // in that case we rollback the tx
-      wallet.rollback(fundingTx)
+      wallet.rollback(KotlinUtils.kmp2scala(psbt.extract().getRight))
       stay()
 
     case Event(INPUT_DISCONNECTED, _) => stay() // we are disconnected, but it doesn't matter anymore
