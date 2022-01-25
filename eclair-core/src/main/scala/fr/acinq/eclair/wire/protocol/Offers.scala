@@ -154,7 +154,7 @@ object Offers {
       signature match {
         case Some(sig) =>
           val withoutSig = TlvStream(records.records.filter { case _: Signature => false case _ => true }, records.unknown)
-          verifySchnorr("lightning" + "offer" + "signature", rootHash(withoutSig, offerTlvCodec).get, sig, nodeId.x)
+          verifySchnorr("lightning" + "offer" + "signature", rootHash(withoutSig, offerTlvCodec).get, sig, ByteVector32(nodeId.value.drop(1)))
         case None => false
       }
     }
@@ -212,7 +212,7 @@ object Offers {
         Some(OfferId(offer.offerId)),
         Some(Amount(amount)),
         if (offer.quantityMin.nonEmpty || offer.quantityMax.nonEmpty) Some(Quantity(quantity)) else None,
-        Some(PayerKey(payerKey.publicKey.x))).flatten
+        Some(PayerKey(ByteVector32(payerKey.publicKey.value.drop(1))))).flatten
       val signature = signSchnorr("lightning" + "invoice_request" + "payer_signature", rootHash(TlvStream(requestTlvs), invoiceRequestTlvCodec).get, payerKey)
       InvoiceRequest(TlvStream(requestTlvs :+ Signature(signature)))
     }

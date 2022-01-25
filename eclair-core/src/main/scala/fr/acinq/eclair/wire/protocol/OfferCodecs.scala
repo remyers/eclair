@@ -59,7 +59,7 @@ object OfferCodecs {
 
   // Only the x component of the key is serialized. We arbitrarily add hex"02" to get a valid key.
   // When using this key, we need to try both the version starting with hex"02" and the one starting with hex"03".
-  private val nodeId: Codec[NodeId] = variableSizeBytesLong(varintoverflow, bytes32).xmap[PublicKey](b32 => PublicKey(hex"02" ++ b32), _.x).as[NodeId]
+  private val nodeId: Codec[NodeId] = variableSizeBytesLong(varintoverflow, bytes32).xmap[PublicKey](b32 => PublicKey(hex"02" ++ b32), key => ByteVector32(key.value.drop(1))).as[NodeId]
 
   private val sendInvoice: Codec[SendInvoice] = variableSizeBytesLong(varintoverflow, provide(SendInvoice()))
 

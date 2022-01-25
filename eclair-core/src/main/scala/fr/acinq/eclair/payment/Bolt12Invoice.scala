@@ -87,7 +87,7 @@ case class Bolt12Invoice(records: TlvStream[InvoiceTlv]) extends PaymentRequest 
   val signature: ByteVector64 = records.get[Signature].get.signature
 
   def isValidFor(offer: Offer, request: InvoiceRequest): Boolean = {
-    nodeId.x == offer.nodeId.x &&
+    nodeId.value.drop(1) == offer.nodeId.value.drop(1) &&
       checkSignature &&
       offerId.contains(offer.offerId) &&
       offer.chains.contains(chain) &&
@@ -112,7 +112,7 @@ case class Bolt12Invoice(records: TlvStream[InvoiceTlv]) extends PaymentRequest 
 
   def checkSignature: Boolean = {
     val withoutSig = TlvStream(records.records.filter { case _: Signature => false case _ => true }, records.unknown)
-    verifySchnorr("lightning" + "invoice" + "signature", rootHash(withoutSig, invoiceTlvCodec).get, signature, nodeId.x)
+    verifySchnorr("lightning" + "invoice" + "signature", rootHash(withoutSig, invoiceTlvCodec).get, signature, ByteVector32(nodeId.value.drop(1)))
   }
 
   def withNodeId(id: PublicKey): Bolt12Invoice =
