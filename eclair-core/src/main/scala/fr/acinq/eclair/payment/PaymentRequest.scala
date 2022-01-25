@@ -51,6 +51,10 @@ trait PaymentRequest {
 
 object PaymentRequest {
   def read(input: String): PaymentRequest = {
-    Bolt11Invoice.read(input)
+    if (input.startsWith("lni")) {
+      Bolt12Invoice.read(input)
+    } else {
+      Bolt11Invoice.read(input)
+    }
   }
 }
