@@ -29,7 +29,7 @@ import scodec.bits.ByteVector
 import scodec.{Attempt, Codec, DecodeResult}
 
 import java.util.UUID
-import scala.util.Try
+import scala.util.{Failure, Success, Try}
 
 /**
  * Created by t-bast on 08/10/2019.
@@ -84,10 +84,30 @@ object IncomingPaymentPacket {
     decryptOnion(add.paymentHash, privateKey, add.onionRoutingPacket, PaymentOnionCodecs.paymentOnionPerHopPayloadCodec) match {
       case Left(failure) => Left(failure)
       // NB: we don't validate the ChannelRelayPacket here because its fees and cltv depend on what channel we'll choose to use.
-      case Right(DecodedOnionPacket(payload: PaymentOnion.ChannelRelayPayload, next)) => Right(ChannelRelayPacket(add, payload, next))
+      case Right(DecodedOnionPacket(payload: PaymentOnion.ChannelRelayTlvPayload, next)) => payload.records.get[OnionPaymentPayloadTlv.EncryptedRecipientData] match {
+        case Some(OnionPaymentPayloadTlv.EncryptedRecipientData(data)) => payload.records.get[OnionPaymentPayloadTlv.BlindingPoint] match {
+          case Some(OnionPaymentPayloadTlv.BlindingPoint(blindingKey)) => Sphinx.RouteBlinding.decryptPayload(privateKey, blindingKey, data) match {
+            case Failure(failure) => Left(???)
+            case Success((decrypted, derivedNextBlindingKey)) => RouteBlindingEncryptedDataCodecs.encryptedDataCodec.decode(decrypted.bits) match {
+              case Attempt.Successful(DecodeResult(relayNext, _)) =>
+                relayNext.get[RouteBlindingEncryptedDataTlv.OutgoingChannelId] match {
+                  case Some(RouteBlindingEncryptedDataTlv.OutgoingChannelId(_)) =>
+                    val nextBlindingKey = relayNext.get[RouteBlindingEncryptedDataTlv.NextBlinding].map(_.blinding).getOrElse(derivedNextBlindingKey)
+                    Right(ChannelRelayPacket(add, PaymentOnion.ChannelRelayTlvPayload(payload.records, Some(relayNext, nextBlindingKey)), next))
+                  case None => Left(???)
+                }
+              case Attempt.Failure(cause) => Left(???)
+            }
+          }
+          case None => Left(???)
+        }
+        case None => Right(ChannelRelayPacket(add, payload, next))
+      }
+      case Right(DecodedOnionPacket(payload: PaymentOnion.RelayLegacyPayload, next)) => Right(ChannelRelayPacket(add, payload, next))
       case Right(DecodedOnionPacket(payload: PaymentOnion.FinalTlvPayload, _)) => payload.records.get[OnionPaymentPayloadTlv.TrampolineOnion] match {
         case Some(OnionPaymentPayloadTlv.TrampolineOnion(trampolinePacket)) => decryptOnion(add.paymentHash, privateKey, trampolinePacket, PaymentOnionCodecs.trampolineOnionPerHopPayloadCodec) match {
           case Left(failure) => Left(failure)
+          // TODO: decrypt EncryptedRecipientData
           case Right(DecodedOnionPacket(innerPayload: PaymentOnion.NodeRelayPayload, next)) => validateNodeRelay(add, payload, innerPayload, next)
           case Right(DecodedOnionPacket(innerPayload: PaymentOnion.FinalPayload, _)) => validateFinal(add, payload, innerPayload)
         }
