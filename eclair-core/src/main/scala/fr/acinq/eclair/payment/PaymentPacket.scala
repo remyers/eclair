@@ -29,7 +29,7 @@ import scodec.bits.ByteVector
 import scodec.{Attempt, Codec, DecodeResult}
 
 import java.util.UUID
-import scala.util.Try
+import scala.util.{Failure, Success, Try}
 
 /**
  * Created by t-bast on 08/10/2019.
@@ -84,11 +84,49 @@ object IncomingPaymentPacket {
     decryptOnion(add.paymentHash, privateKey, add.onionRoutingPacket, PaymentOnionCodecs.paymentOnionPerHopPayloadCodec) match {
       case Left(failure) => Left(failure)
       // NB: we don't validate the ChannelRelayPacket here because its fees and cltv depend on what channel we'll choose to use.
-      case Right(DecodedOnionPacket(payload: PaymentOnion.ChannelRelayPayload, next)) => Right(ChannelRelayPacket(add, payload, next))
+      case Right(DecodedOnionPacket(payload: PaymentOnion.ChannelRelayTlvPayload, next)) => payload.records.get[OnionPaymentPayloadTlv.EncryptedRecipientData] match {
+        case Some(OnionPaymentPayloadTlv.EncryptedRecipientData(data)) => payload.records.get[OnionPaymentPayloadTlv.BlindingPoint] match {
+          case Some(OnionPaymentPayloadTlv.BlindingPoint(blindingKey)) => Sphinx.RouteBlinding.decryptPayload(privateKey, blindingKey, data) match {
+            case Failure(_) => Left(InvalidOnionPayload(UInt64(10), 0))
+            case Success((decrypted, _)) => RouteBlindingEncryptedDataCodecs.encryptedDataCodec.decode(decrypted.bits) match {
+              case Attempt.Successful(DecodeResult(relayNext, _)) =>
+                relayNext.get[RouteBlindingEncryptedDataTlv.OutgoingChannelId] match {
+                  case Some(RouteBlindingEncryptedDataTlv.OutgoingChannelId(_)) =>
+                    Right(ChannelRelayPacket(add, PaymentOnion.ChannelRelayTlvPayload(payload.records, Some(relayNext)), next))
+                  case None => Left(InvalidOnionPayload(UInt64(4), 0))
+                }
+              case Attempt.Failure(e: OnionRoutingCodecs.MissingRequiredTlv) => Left(e.failureMessage)
+              case Attempt.Failure(_) => Left(InvalidOnionPayload(UInt64(0), 0))
+            }
+          }
+          case None => Left(InvalidOnionPayload(UInt64(12), 0))
+        }
+        case None => Right(ChannelRelayPacket(add, payload, next))
+      }
+      case Right(DecodedOnionPacket(payload: PaymentOnion.RelayLegacyPayload, next)) => Right(ChannelRelayPacket(add, payload, next))
       case Right(DecodedOnionPacket(payload: PaymentOnion.FinalTlvPayload, _)) => payload.records.get[OnionPaymentPayloadTlv.TrampolineOnion] match {
         case Some(OnionPaymentPayloadTlv.TrampolineOnion(trampolinePacket)) => decryptOnion(add.paymentHash, privateKey, trampolinePacket, PaymentOnionCodecs.trampolineOnionPerHopPayloadCodec) match {
           case Left(failure) => Left(failure)
-          case Right(DecodedOnionPacket(innerPayload: PaymentOnion.NodeRelayPayload, next)) => validateNodeRelay(add, payload, innerPayload, next)
+          case Right(DecodedOnionPacket(innerPayload: PaymentOnion.NodeRelayPayload, next)) =>
+            innerPayload.records.get[OnionPaymentPayloadTlv.EncryptedRecipientData] match {
+              case Some(OnionPaymentPayloadTlv.EncryptedRecipientData(data)) => innerPayload.records.get[OnionPaymentPayloadTlv.BlindingPoint] match {
+                case Some(OnionPaymentPayloadTlv.BlindingPoint(blindingKey)) => Sphinx.RouteBlinding.decryptPayload(privateKey, blindingKey, data) match {
+                  case Failure(_) => Left(InvalidOnionPayload(UInt64(10), 0))
+                  case Success((decrypted, _)) => RouteBlindingEncryptedDataCodecs.encryptedDataCodec.decode(decrypted.bits) match {
+                    case Attempt.Successful(DecodeResult(relayNext, _)) =>
+                      relayNext.get[RouteBlindingEncryptedDataTlv.OutgoingNodeId] match {
+                        case Some(RouteBlindingEncryptedDataTlv.OutgoingNodeId(_)) =>
+                          validateNodeRelay(add, payload, PaymentOnion.NodeRelayPayload(innerPayload.records, Some(relayNext)), next)
+                        case None => Left(InvalidOnionPayload(UInt64(4), 0))
+                      }
+                    case Attempt.Failure(e: OnionRoutingCodecs.MissingRequiredTlv) => Left(e.failureMessage)
+                    case Attempt.Failure(_) => Left(InvalidOnionPayload(UInt64(0), 0))
+                  }
+                }
+                case None => Left(InvalidOnionPayload(UInt64(12), 0))
+              }
+              case None => validateNodeRelay(add, payload, innerPayload, next)
+            }
           case Right(DecodedOnionPacket(innerPayload: PaymentOnion.FinalPayload, _)) => validateFinal(add, payload, innerPayload)
         }
         case None => validateFinal(add, payload)

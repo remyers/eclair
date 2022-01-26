@@ -253,21 +253,21 @@ object PaymentOnion {
 
   case class RelayLegacyPayload(outgoingChannelId: ShortChannelId, amountToForward: MilliSatoshi, outgoingCltv: CltvExpiry) extends ChannelRelayPayload with LegacyFormat
 
-  case class ChannelRelayTlvPayload(records: TlvStream[OnionPaymentPayloadTlv]) extends ChannelRelayPayload with TlvFormat {
+  case class ChannelRelayTlvPayload(records: TlvStream[OnionPaymentPayloadTlv], blinded: Option[TlvStream[RouteBlindingEncryptedDataTlv]]) extends ChannelRelayPayload with TlvFormat {
     override val amountToForward = records.get[AmountToForward].get.amount
     override val outgoingCltv = records.get[OutgoingCltv].get.cltv
-    override val outgoingChannelId = records.get[OutgoingChannelId].get.shortChannelId
+    override val outgoingChannelId = blinded.map(_.get[RouteBlindingEncryptedDataTlv.OutgoingChannelId].get.shortChannelId).getOrElse(records.get[OutgoingChannelId].get.shortChannelId)
   }
 
   object ChannelRelayTlvPayload {
     def apply(outgoingChannelId: ShortChannelId, amountToForward: MilliSatoshi, outgoingCltv: CltvExpiry): ChannelRelayTlvPayload =
-      ChannelRelayTlvPayload(TlvStream(OnionPaymentPayloadTlv.AmountToForward(amountToForward), OnionPaymentPayloadTlv.OutgoingCltv(outgoingCltv), OnionPaymentPayloadTlv.OutgoingChannelId(outgoingChannelId)))
+      ChannelRelayTlvPayload(TlvStream(OnionPaymentPayloadTlv.AmountToForward(amountToForward), OnionPaymentPayloadTlv.OutgoingCltv(outgoingCltv), OnionPaymentPayloadTlv.OutgoingChannelId(outgoingChannelId)), None)
   }
 
-  case class NodeRelayPayload(records: TlvStream[OnionPaymentPayloadTlv]) extends RelayPayload with TlvFormat with TrampolinePacket {
+  case class NodeRelayPayload(records: TlvStream[OnionPaymentPayloadTlv], blinded: Option[TlvStream[RouteBlindingEncryptedDataTlv]]) extends RelayPayload with TlvFormat with TrampolinePacket {
     val amountToForward = records.get[AmountToForward].get.amount
     val outgoingCltv = records.get[OutgoingCltv].get.cltv
-    val outgoingNodeId = records.get[OutgoingNodeId].get.nodeId
+    val outgoingNodeId = blinded.map(_.get[RouteBlindingEncryptedDataTlv.OutgoingNodeId].get.nodeId).getOrElse(records.get[OutgoingNodeId].get.nodeId)
     // The following fields are only included in the trampoline-to-legacy case.
     val totalAmount = records.get[PaymentData].map(_.totalAmount match {
       case MilliSatoshi(0) => amountToForward
@@ -292,7 +292,7 @@ object PaymentOnion {
   }
 
   def createNodeRelayPayload(amount: MilliSatoshi, expiry: CltvExpiry, nextNodeId: PublicKey): NodeRelayPayload =
-    NodeRelayPayload(TlvStream(AmountToForward(amount), OutgoingCltv(expiry), OutgoingNodeId(nextNodeId)))
+    NodeRelayPayload(TlvStream(AmountToForward(amount), OutgoingCltv(expiry), OutgoingNodeId(nextNodeId)), None)
 
   /** Create a trampoline inner payload instructing the trampoline node to relay via a non-trampoline payment. */
   def createNodeRelayToNonTrampolinePayload(amount: MilliSatoshi, totalAmount: MilliSatoshi, expiry: CltvExpiry, targetNodeId: PublicKey, invoice: PaymentRequest): NodeRelayPayload = {
@@ -305,7 +305,7 @@ object PaymentOnion {
       Some(InvoiceFeatures(invoice.features.toByteVector)),
       Some(InvoiceRoutingInfo(invoice.routingInfo.toList.map(_.toList)))
     ).flatten
-    NodeRelayPayload(TlvStream(tlvs))
+    NodeRelayPayload(TlvStream(tlvs), None)
   }
 
   def createSinglePartPayload(amount: MilliSatoshi, expiry: CltvExpiry, paymentSecret: ByteVector32, paymentMetadata: Option[ByteVector], userCustomTlvs: Seq[GenericTlv] = Nil): FinalPayload = {
@@ -408,20 +408,20 @@ object PaymentOnionCodecs {
     case Left(tlvs) if tlvs.get[AmountToForward].isEmpty => Attempt.failure(MissingRequiredTlv(UInt64(2)))
     case Left(tlvs) if tlvs.get[OutgoingCltv].isEmpty => Attempt.failure(MissingRequiredTlv(UInt64(4)))
     case Left(tlvs) if tlvs.get[OutgoingChannelId].isEmpty => Attempt.failure(MissingRequiredTlv(UInt64(6)))
-    case Left(tlvs) => Attempt.successful(ChannelRelayTlvPayload(tlvs))
+    case Left(tlvs) => Attempt.successful(ChannelRelayTlvPayload(tlvs, None))
     case Right(legacy) => Attempt.successful(legacy)
   }, {
     case legacy: RelayLegacyPayload => Right(legacy)
-    case ChannelRelayTlvPayload(tlvs) => Left(tlvs)
+    case ChannelRelayTlvPayload(tlvs, _) => Left(tlvs)
   })
 
   val nodeRelayPerHopPayloadCodec: Codec[NodeRelayPayload] = tlvPerHopPayloadCodec.narrow({
     case tlvs if tlvs.get[AmountToForward].isEmpty => Attempt.failure(MissingRequiredTlv(UInt64(2)))
     case tlvs if tlvs.get[OutgoingCltv].isEmpty => Attempt.failure(MissingRequiredTlv(UInt64(4)))
     case tlvs if tlvs.get[OutgoingNodeId].isEmpty => Attempt.failure(MissingRequiredTlv(UInt64(66098)))
-    case tlvs => Attempt.successful(NodeRelayPayload(tlvs))
+    case tlvs => Attempt.successful(NodeRelayPayload(tlvs, None))
   }, {
-    case NodeRelayPayload(tlvs) => tlvs
+    case NodeRelayPayload(tlvs, _) => tlvs
   })
 
   val finalPerHopPayloadCodec: Codec[FinalPayload] = tlvPerHopPayloadCodec.narrow({

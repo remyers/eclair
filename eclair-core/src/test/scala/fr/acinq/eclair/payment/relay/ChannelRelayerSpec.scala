@@ -90,7 +90,7 @@ class ChannelRelayerSpec extends ScalaTestWithActorTestKit(ConfigFactory.load("a
     import f._
     import fr.acinq.eclair.wire.protocol.OnionPaymentPayloadTlv._
 
-    val payload = ChannelRelayTlvPayload(TlvStream[OnionPaymentPayloadTlv](AmountToForward(outgoingAmount), OutgoingCltv(outgoingExpiry), OutgoingChannelId(shortId1)))
+    val payload = ChannelRelayTlvPayload(TlvStream[OnionPaymentPayloadTlv](AmountToForward(outgoingAmount), OutgoingCltv(outgoingExpiry), OutgoingChannelId(shortId1)), None)
     val r = createValidIncomingPacket(1100000 msat, CltvExpiry(400100), payload)
     val u = createLocalUpdate(shortId1)
 
