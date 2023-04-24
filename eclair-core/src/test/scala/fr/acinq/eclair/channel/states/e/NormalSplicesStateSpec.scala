@@ -22,6 +22,7 @@ import akka.testkit.{TestFSMRef, TestProbe}
 import fr.acinq.bitcoin.scalacompat.{ByteVector32, SatoshiLong, Transaction}
 import fr.acinq.eclair._
 import fr.acinq.eclair.blockchain.bitcoind.ZmqWatcher._
+import fr.acinq.eclair.blockchain.fee.FeeratePerKw
 import fr.acinq.eclair.channel.Helpers.Closing.{LocalClose, RemoteClose, RevokedClose}
 import fr.acinq.eclair.channel.LocalFundingStatus.DualFundedUnconfirmedFundingTx
 import fr.acinq.eclair.channel._
@@ -31,13 +32,14 @@ import fr.acinq.eclair.channel.publish.TxPublisher.{PublishFinalTx, PublishRepla
 import fr.acinq.eclair.channel.states.ChannelStateTestsBase.FakeTxPublisherFactory
 import fr.acinq.eclair.channel.states.ChannelStateTestsTags.NoMaxHtlcValueInFlight
 import fr.acinq.eclair.channel.states.{ChannelStateTestsBase, ChannelStateTestsTags}
+import fr.acinq.eclair.payment.relay.Relayer.RelayForward
 import fr.acinq.eclair.testutils.PimpTestProbe.convert
 import fr.acinq.eclair.transactions.Transactions
 import fr.acinq.eclair.wire.protocol._
 import org.scalatest.funsuite.FixtureAnyFunSuiteLike
 import org.scalatest.time.SpanSugar.convertIntToGrainOfTime
 import org.scalatest.{Outcome, Tag}
-import scodec.bits.{ByteVector, HexStringSyntax}
+import scodec.bits.HexStringSyntax
 
 /**
  * Created by PM on 23/12/2022.
@@ -50,7 +52,7 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
   implicit val log: akka.event.LoggingAdapter = akka.event.NoLogging
 
   override def withFixture(test: OneArgTest): Outcome = {
-    val tags = test.tags + ChannelStateTestsTags.DualFunding + ChannelStateTestsTags.Splicing
+    val tags = test.tags + ChannelStateTestsTags.DualFunding + ChannelStateTestsTags.Splicing + ChannelStateTestsTags.Quiescence
     val setup = init(tags = tags)
     import setup._
     reachNormal(setup, tags)
@@ -61,12 +63,16 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
 
   private val defaultSpliceOutScriptPubKey = hex"0020aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
-  private def initiateSplice(f: FixtureParam, spliceIn_opt: Option[SpliceIn] = None, spliceOut_opt: Option[SpliceOut] = None): Transaction = {
+  private def initiateSplice(f: FixtureParam, spliceIn_opt: Option[SpliceIn] = None, spliceOut_opt: Option[SpliceOut] = None, cmds_opt: Option[Seq[channel.Command]] = None): Transaction = {
     import f._
 
     val sender = TestProbe()
     val cmd = CMD_SPLICE(sender.ref, spliceIn_opt, spliceOut_opt)
     alice ! cmd
+    alice2bob.expectMsgType[Stfu]
+    alice2bob.forward(bob)
+    bob2alice.expectMsgType[Stfu]
+    bob2alice.forward(alice)
     alice2bob.expectMsgType[SpliceInit]
     alice2bob.forward(bob)
     bob2alice.expectMsgType[SpliceAck]
@@ -98,6 +104,15 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     bob2alice.forward(alice)
     alice2bob.expectMsgType[TxComplete]
     alice2bob.forward(bob)
+
+    cmds_opt.foreach(cmds => cmds.foreach {
+      case cmd: channel.HtlcSettlementCommand =>
+        // this would be done automatically when the relayer calls safeSend
+        alice.underlyingActor.nodeParams.db.pendingCommands.addSettlementCommand(alice.stateData.channelId, cmd)
+        alice ! cmd
+      case cmd: channel.Command => alice ! cmd
+    })
+
     bob2alice.expectMsgType[CommitSig]
     bob2alice.forward(alice)
     alice2bob.expectMsgType[CommitSig]
@@ -166,6 +181,7 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     val sender = TestProbe()
     val cmd = CMD_SPLICE(sender.ref, spliceIn_opt = None, Some(SpliceOut(790_000 sat, defaultSpliceOutScriptPubKey)))
     alice ! cmd
+    alice ! Stfu(randomBytes32(), 0)
     sender.expectMsgType[RES_FAILURE[_, _]]
   }
 
@@ -423,55 +439,152 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     awaitCond(bob.stateData.asInstanceOf[DATA_NORMAL].commitments.active.forall(_.localCommit.spec.htlcs.size == 1))
   }
 
-  test("recv CMD_ADD_HTLC while a splice is requested") { f =>
+  test("recv fulfill htlc command during splice") { f =>
     import f._
-    val sender = TestProbe()
-    val cmd = CMD_SPLICE(sender.ref, spliceIn_opt = Some(SpliceIn(500_000 sat, pushAmount = 0 msat)), spliceOut_opt = None)
-    alice ! cmd
-    alice2bob.expectMsgType[SpliceInit]
-    alice ! CMD_ADD_HTLC(sender.ref, 500000 msat, randomBytes32(), CltvExpiryDelta(144).toCltvExpiry(currentBlockHeight), TestConstants.emptyOnionPacket, None, localOrigin(sender.ref))
-    sender.expectMsgType[RES_ADD_FAILED[_]]
-    alice2bob.expectNoMessage(100 millis)
-  }
-
-  test("recv CMD_ADD_HTLC while a splice is in progress") { f =>
-    import f._
-    val sender = TestProbe()
-    val cmd = CMD_SPLICE(sender.ref, spliceIn_opt = Some(SpliceIn(500_000 sat, pushAmount = 0 msat)), spliceOut_opt = None)
-    alice ! cmd
-    alice2bob.expectMsgType[SpliceInit]
-    alice2bob.forward(bob)
-    bob2alice.expectMsgType[SpliceAck]
-    bob2alice.forward(alice)
-    alice2bob.expectMsgType[TxAddInput]
-    alice ! CMD_ADD_HTLC(sender.ref, 500000 msat, randomBytes32(), CltvExpiryDelta(144).toCltvExpiry(currentBlockHeight), TestConstants.emptyOnionPacket, None, localOrigin(sender.ref))
-    sender.expectMsgType[RES_ADD_FAILED[_]]
-    alice2bob.expectNoMessage(100 millis)
-  }
-
-  test("recv UpdateAddHtlc while a splice is requested") { f =>
-    import f._
-    val sender = TestProbe()
-    val cmd = CMD_SPLICE(sender.ref, spliceIn_opt = Some(SpliceIn(500_000 sat, pushAmount = 0 msat)), spliceOut_opt = None)
-    alice ! cmd
-    alice2bob.expectMsgType[SpliceInit]
-    // we're holding the splice_init to create a race
-
-    val (preimage, cmdAdd: CMD_ADD_HTLC) = makeCmdAdd(5_000_000 msat, bob.underlyingActor.remoteNodeId, bob.underlyingActor.nodeParams.currentBlockHeight)
-    bob ! cmdAdd
-    val add = bob2alice.expectMsgType[UpdateAddHtlc]
-    bob2alice.forward(alice)
-    // now we forward the splice_init
-    alice2bob.forward(bob)
-    // this cancels the splice
-    bob2alice.expectMsgType[TxAbort]
-    bob2alice.forward(alice)
-    alice2bob.expectMsgType[TxAbort]
-    alice2bob.forward(bob)
-    // but the htlc goes through normally
+    val (preimage, add) = addHtlc(10_000 msat, bob, alice, bob2alice, alice2bob)
+    val cmds = Seq(CMD_FULFILL_HTLC(add.id, preimage))
     crossSign(bob, alice, bob2alice, alice2bob)
-    fulfillHtlc(add.id, preimage, alice, bob, alice2bob, bob2alice)
+    initiateSplice(f, spliceIn_opt = Some(SpliceIn(500_000 sat, pushAmount = 0 msat)), None, Some(cmds))
+    alice2bob.expectMsgType[UpdateFulfillHtlc]
+    alice2bob.forward(bob)
     crossSign(alice, bob, alice2bob, bob2alice)
+  }
+
+  test( "recv fail htlc command during splice") { f =>
+    import f._
+    val (_, add) = addHtlc(10_000 msat, bob, alice, bob2alice, alice2bob)
+    val cmds = Seq(CMD_FAIL_HTLC(add.id, Left(randomBytes32())))
+    crossSign(bob, alice, bob2alice, alice2bob)
+    initiateSplice(f, spliceIn_opt = Some(SpliceIn(500_000 sat, pushAmount = 0 msat)), None, cmds_opt = Some(cmds))
+    alice2bob.expectMsgType[UpdateFailHtlc]
+    alice2bob.forward(bob)
+    crossSign(alice, bob, alice2bob, bob2alice)
+  }
+
+  test("recv fail malformed htlc command during splice") { f =>
+    import f._
+    val (_, add) = addHtlc(10_000 msat, bob, alice, bob2alice, alice2bob)
+    val cmds = Seq(CMD_FAIL_MALFORMED_HTLC(add.id, randomBytes32(), FailureMessageCodecs.BADONION))
+    crossSign(bob, alice, bob2alice, alice2bob)
+    initiateSplice(f, spliceIn_opt = Some(SpliceIn(500_000 sat, pushAmount = 0 msat)), None, cmds_opt = Some(cmds))
+    alice2bob.expectMsgType[UpdateFailMalformedHtlc]
+    alice2bob.forward(bob)
+    crossSign(alice, bob, alice2bob, bob2alice)
+  }
+
+  test("recv (forbidden) shutdown message while quiescent") { f =>
+    import f._
+    val sender = TestProbe()
+    val cmd = CMD_SPLICE(sender.ref, spliceIn_opt = Some(SpliceIn(500_000 sat, pushAmount = 0 msat)), spliceOut_opt = None)
+    alice ! cmd
+    alice2bob.expectMsgType[Stfu]
+    alice2bob.forward(bob)
+    bob2alice.expectMsgType[Stfu]
+    bob2alice.forward(alice)
+    alice2bob.expectMsgType[SpliceInit]
+    // both alice and bob are quiescent, we're holding the splice-init to pause the splice
+
+    val bobData = bob.stateData.asInstanceOf[DATA_NORMAL]
+    alice ! Shutdown(ByteVector32.Zeroes, bob.underlyingActor.getOrGenerateFinalScriptPubKey(bobData))
+    alice2bob.expectMsgType[Error]
+    awaitCond(alice.stateName == CLOSING)
+  }
+
+  test("recv (forbidden) UpdateFulfillHtlc messages while quiescent") { f =>
+    import f._
+    val (preimage, add) = addHtlc(10_000 msat, bob, alice, bob2alice, alice2bob)
+    crossSign(bob, alice, bob2alice, alice2bob)
+    val sender = TestProbe()
+    val cmd = CMD_SPLICE(sender.ref, spliceIn_opt = Some(SpliceIn(500_000 sat, pushAmount = 0 msat)), spliceOut_opt = None)
+    alice ! cmd
+    alice2bob.expectMsgType[Stfu]
+    alice2bob.forward(bob)
+    bob2alice.expectMsgType[Stfu]
+    bob2alice.forward(alice)
+    alice2bob.expectMsgType[SpliceInit]
+    // both alice and bob are quiescent, we're holding the splice-init to pause the splice
+
+    alice ! UpdateFulfillHtlc(add.channelId, add.id, preimage)
+    alice2relayer.expectMsg(RelayForward(add))
+    alice2bob.expectMsgType[Error]
+    assertPublished(alice2blockchain, "commit-tx")
+    assertPublished(alice2blockchain, "local-main-delayed")
+    alice2blockchain.expectMsgType[WatchTxConfirmed]
+    alice2blockchain.expectMsgType[WatchTxConfirmed]
+    alice2blockchain.expectNoMessage(100 millis)
+    awaitCond(alice.stateName == CLOSING)
+  }
+
+  test("recv (forbidden) UpdateFailHtlc messages while quiescent") { f =>
+    import f._
+    val (_, add) = addHtlc(10_000 msat, bob, alice, bob2alice, alice2bob)
+    crossSign(bob, alice, bob2alice, alice2bob)
+    val sender = TestProbe()
+    val cmd = CMD_SPLICE(sender.ref, spliceIn_opt = Some(SpliceIn(500_000 sat, pushAmount = 0 msat)), spliceOut_opt = None)
+    alice ! cmd
+    alice2bob.expectMsgType[Stfu]
+    alice2bob.forward(bob)
+    bob2alice.expectMsgType[Stfu]
+    bob2alice.forward(alice)
+    alice2bob.expectMsgType[SpliceInit]
+    // both alice and bob are quiescent, we're holding the splice-init to pause the splice
+
+    alice ! UpdateFailHtlc(add.channelId, add.id, randomBytes32())
+    alice2bob.expectMsgType[Error]
+    assertPublished(alice2blockchain, "commit-tx")
+    assertPublished(alice2blockchain, "local-main-delayed")
+    alice2blockchain.expectMsgType[WatchTxConfirmed]
+    alice2blockchain.expectMsgType[WatchTxConfirmed]
+    alice2blockchain.expectNoMessage(100 millis)
+    awaitCond(alice.stateName == CLOSING)
+  }
+
+  test("recv (forbidden) UpdateFailMalformedHtlc messages while quiescent") { f =>
+    import f._
+    val (preimage, add) = addHtlc(10_000 msat, bob, alice, bob2alice, alice2bob)
+    crossSign(bob, alice, bob2alice, alice2bob)
+    val sender = TestProbe()
+    val cmd = CMD_SPLICE(sender.ref, spliceIn_opt = Some(SpliceIn(500_000 sat, pushAmount = 0 msat)), spliceOut_opt = None)
+    alice ! cmd
+    alice2bob.expectMsgType[Stfu]
+    alice2bob.forward(bob)
+    bob2alice.expectMsgType[Stfu]
+    bob2alice.forward(alice)
+    alice2bob.expectMsgType[SpliceInit]
+    // both alice and bob are quiescent, we're holding the splice-init to pause the splice
+
+    alice ! UpdateFailMalformedHtlc(add.channelId, add.id, randomBytes32(), FailureMessageCodecs.BADONION)
+    alice2bob.expectMsgType[Error]
+    assertPublished(alice2blockchain, "commit-tx")
+    assertPublished(alice2blockchain, "local-main-delayed")
+    alice2blockchain.expectMsgType[WatchTxConfirmed]
+    alice2blockchain.expectMsgType[WatchTxConfirmed]
+    alice2blockchain.expectNoMessage(100 millis)
+    awaitCond(alice.stateName == CLOSING)
+  }
+
+  test("recv (forbidden) UpdateFee messages while quiescent") { f =>
+    import f._
+    val (preimage, add) = addHtlc(10_000 msat, bob, alice, bob2alice, alice2bob)
+    crossSign(bob, alice, bob2alice, alice2bob)
+    val sender = TestProbe()
+    val cmd = CMD_SPLICE(sender.ref, spliceIn_opt = Some(SpliceIn(500_000 sat, pushAmount = 0 msat)), spliceOut_opt = None)
+    alice ! cmd
+    alice2bob.expectMsgType[Stfu]
+    alice2bob.forward(bob)
+    bob2alice.expectMsgType[Stfu]
+    bob2alice.forward(alice)
+    alice2bob.expectMsgType[SpliceInit]
+    // both alice and bob are quiescent, we're holding the splice-init to pause the splice
+
+    alice ! UpdateFee(add.channelId, FeeratePerKw(1 sat))
+    alice2bob.expectMsgType[Error]
+    assertPublished(alice2blockchain, "commit-tx")
+    assertPublished(alice2blockchain, "local-main-delayed")
+    alice2blockchain.expectMsgType[WatchTxConfirmed]
+    alice2blockchain.expectMsgType[WatchTxConfirmed]
+    alice2blockchain.expectNoMessage(100 millis)
+    awaitCond(alice.stateName == CLOSING)
   }
 
   test("recv UpdateAddHtlc while a splice is in progress") { f =>
@@ -479,6 +592,10 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     val sender = TestProbe()
     val cmd = CMD_SPLICE(sender.ref, spliceIn_opt = Some(SpliceIn(500_000 sat, pushAmount = 0 msat)), spliceOut_opt = None)
     alice ! cmd
+    alice2bob.expectMsgType[Stfu]
+    alice2bob.forward(bob)
+    bob2alice.expectMsgType[Stfu]
+    bob2alice.forward(alice)
     alice2bob.expectMsgType[SpliceInit]
     alice2bob.forward(bob)
     bob2alice.expectMsgType[SpliceAck]
@@ -494,6 +611,7 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     alice2blockchain.expectMsgType[WatchTxConfirmed]
     alice2blockchain.expectMsgType[WatchTxConfirmed]
     alice2blockchain.expectNoMessage(100 millis)
+    awaitCond(alice.stateName == CLOSING)
   }
 
   test("cancels splice on disconnection") { f =>
@@ -502,6 +620,10 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     val sender = TestProbe()
     val cmd = CMD_SPLICE(sender.ref, spliceIn_opt = Some(SpliceIn(500_000 sat, pushAmount = 0 msat)), spliceOut_opt = None)
     alice ! cmd
+    alice2bob.expectMsgType[Stfu]
+    alice2bob.forward(bob)
+    bob2alice.expectMsgType[Stfu]
+    bob2alice.forward(alice)
     alice2bob.expectMsgType[SpliceInit]
     alice2bob.forward(bob)
     bob2alice.expectMsgType[SpliceAck]
