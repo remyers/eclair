@@ -22,10 +22,8 @@ import fr.acinq.bitcoin.scalacompat.{Block, SatoshiLong}
 import fr.acinq.eclair.FeatureSupport.{Mandatory, Optional}
 import fr.acinq.eclair.Features._
 import fr.acinq.eclair.TestConstants.feeratePerKw
-import fr.acinq.eclair.blockchain.fee.{DustTolerance, FeeratePerByte, FeeratePerKw, FeerateTolerance, FeeratesPerKw}
+import fr.acinq.eclair.blockchain.fee._
 import fr.acinq.eclair.crypto.keymanager.{LocalChannelKeyManager, LocalNodeKeyManager}
-import fr.acinq.eclair.blockchain.fee.{DustTolerance, FeeratePerByte, FeeratePerKw, FeerateTolerance}
-import fr.acinq.eclair.crypto.keymanager.{LocalChannelKeyManager, LocalNodeKeyManager, LocalOnchainKeyManager}
 import org.scalatest.funsuite.AnyFunSuite
 import scodec.bits.{ByteVector, HexStringSyntax}
 
@@ -43,9 +41,8 @@ class StartupSpec extends AnyFunSuite {
     val feerates = new AtomicReference(FeeratesPerKw.single(feeratePerKw))
     val nodeKeyManager = new LocalNodeKeyManager(randomBytes32(), chainHash = Block.TestnetGenesisBlock.hash)
     val channelKeyManager = new LocalChannelKeyManager(randomBytes32(), chainHash = Block.TestnetGenesisBlock.hash)
-    val onchainKeyManager = new LocalOnchainKeyManager(randomBytes32(), chainHash = Block.TestnetGenesisBlock.hash)
     val db = TestDatabases.inMemoryDb()
-    NodeParams.makeNodeParams(conf, UUID.fromString("01234567-0123-4567-89ab-0123456789ab"), nodeKeyManager, channelKeyManager, onchainKeyManager, None, db, blockCount, feerates)
+    NodeParams.makeNodeParams(conf, UUID.fromString("01234567-0123-4567-89ab-0123456789ab"), nodeKeyManager, channelKeyManager, None, db, blockCount, feerates)
   }
 
   test("check configuration") {
