@@ -34,9 +34,15 @@ trait OnChain {
   }
 
   val sendOnChain: Route = postRequest("sendonchain") { implicit t =>
-    formFields("address".as[String], "amountSatoshis".as[Satoshi], "confirmationTarget".as[Long]) {
-      (address, amount, confirmationTarget) =>
-        complete(eclairApi.sendOnChain(address, amount, confirmationTarget))
+    formFields("address".as[String], "amountSatoshis".as[Satoshi], "confirmationTarget".as[Long].?, "feeRatePerByte".as[Int].?) {
+      (address, amount, confirmationTarget_opt, feeratePerByte_opt) => {
+        val confirmationTargetOrFeerate = (feeratePerByte_opt, confirmationTarget_opt) match {
+          case (Some(feeratePerByte), _) => Right(FeeratePerByte(Satoshi(feeratePerByte)))
+          case (None, Some(confirmationTarget)) => Left(confirmationTarget)
+          case _ => throw new IllegalArgumentException("You must provide a confirmation target (in blocks) or a fee rate (in sat/vb)")
+        }
+        complete(eclairApi.sendOnChain(address, amount, confirmationTargetOrFeerate))
+      }
     }
   }
 
