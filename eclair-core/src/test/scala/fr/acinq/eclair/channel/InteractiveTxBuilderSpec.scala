@@ -2511,13 +2511,19 @@ class InteractiveTxBuilderSpec extends TestKitBaseClass with AnyFunSuiteLike wit
   test("reference test vector") {
     val channelId = ByteVector32.Zeroes
     val parentTx = Transaction.read("02000000000101f86fd1d0db3ac5a72df968622f31e6b5e6566a09e29206d7c7a55df90e181de800000000171600141fb9623ffd0d422eacc450fd1e967efc477b83ccffffffff0580b2e60e00000000220020fd89acf65485df89797d9ba7ba7a33624ac4452f00db08107f34257d33e5b94680b2e60e0000000017a9146a235d064786b49e7043e4a042d4cc429f7eb6948780b2e60e00000000160014fbb4db9d85fba5e301f4399e3038928e44e37d3280b2e60e0000000017a9147ecd1b519326bc13b0ec716e469b58ed02b112a087f0006bee0000000017a914f856a70093da3a5b5c4302ade033d4c2171705d387024730440220696f6cee2929f1feb3fd6adf024ca0f9aa2f4920ed6d35fb9ec5b78c8408475302201641afae11242160101c6f9932aeb4fcd1f13a9c6df5d1386def000ea259a35001210381d7d5b1bc0d7600565d827242576d9cb793bfe0754334af82289ee8b65d137600000000")
-    val sharedOutput = Output.Shared(UInt64(44), hex"0020297b92c238163e820b82486084634b4846b86a3c658d87b9384192e6bea98ec5", 200_000_000_000L msat, 200_000_000_000L msat)
+    val localAmountIn = 1_749_990_000_000L msat
+    val remoteAmountIn = 2_000_000_000_000L msat
+    val localAmountOut = localAmountIn + (200_000_000_000L msat)
+    val remoteAmountOut = remoteAmountIn + (200_000_000_000L msat)
+    val htlcsAmount = parentTx.txOut(4).amount - (localAmountIn + remoteAmountIn)
+    val sharedOutput = Output.Shared(UInt64(44), hex"0020297b92c238163e820b82486084634b4846b86a3c658d87b9384192e6bea98ec5", localAmountOut, remoteAmountOut, htlcsAmount)
+    val sharedInput = Input.Shared(UInt64(22), OutPoint(parentTx, 4), 4294967293L, localAmountIn, remoteAmountIn)
     val initiatorTx = {
-      val initiatorInput = Input.Local(UInt64(20), parentTx, 0, 4294967293L)
+      val initiatorInput = Input.Local(UInt64(20), parentTx, 0, 4294967293L) // 2_500_000_000 sat
       val initiatorOutput = Output.Local.Change(UInt64(30), 49_999_845 sat, hex"00141ca1cca8855bad6bc1ea5436edd8cff10b7e448b")
-      val nonInitiatorInput = Input.Remote(UInt64(11), OutPoint(parentTx, 2), parentTx.txOut(2), 4294967293L)
+      val nonInitiatorInput = Input.Remote(UInt64(11), OutPoint(parentTx, 2), parentTx.txOut(2), 4294967293L) // 2_500_000_000 sat
       val nonInitiatorOutput = Output.Remote(UInt64(33), 49_999_900 sat, hex"001444cb0c39f93ecc372b5851725bd29d865d333b10")
-      SharedTransaction(None, sharedOutput, List(initiatorInput), List(nonInitiatorInput), List(initiatorOutput), List(nonInitiatorOutput), lockTime = 120)
+      SharedTransaction(Some(sharedInput), sharedOutput, List(initiatorInput), List(nonInitiatorInput), List(initiatorOutput), List(nonInitiatorOutput), lockTime = 120)
     }
     assert(initiatorTx.localFees == 155_000.msat)
     assert(initiatorTx.remoteFees == 100_000.msat)
@@ -2528,23 +2534,23 @@ class InteractiveTxBuilderSpec extends TestKitBaseClass with AnyFunSuiteLike wit
       val initiatorOutput = Output.Remote(UInt64(30), 49_999_845 sat, hex"00141ca1cca8855bad6bc1ea5436edd8cff10b7e448b")
       val nonInitiatorInput = Input.Local(UInt64(11), parentTx, 2, 4294967293L)
       val nonInitiatorOutput = Output.Local.Change(UInt64(33), 49_999_900 sat, hex"001444cb0c39f93ecc372b5851725bd29d865d333b10")
-      SharedTransaction(None, sharedOutput, List(nonInitiatorInput), List(initiatorInput), List(nonInitiatorOutput), List(initiatorOutput), lockTime = 120)
+      SharedTransaction(Some(sharedInput), sharedOutput, List(nonInitiatorInput), List(initiatorInput), List(nonInitiatorOutput), List(initiatorOutput), lockTime = 120)
     }
     assert(nonInitiatorTx.localFees == 100_000.msat)
     assert(nonInitiatorTx.remoteFees == 155_000.msat)
     assert(nonInitiatorTx.fees == 255.sat)
 
-    val unsignedTx = Transaction.read("0200000002b932b0669cd0394d0d5bcc27e01ab8c511f1662a6799925b346c0cf18fca03430200000000fdffffffb932b0669cd0394d0d5bcc27e01ab8c511f1662a6799925b346c0cf18fca03430000000000fdffffff03e5effa02000000001600141ca1cca8855bad6bc1ea5436edd8cff10b7e448b1cf0fa020000000016001444cb0c39f93ecc372b5851725bd29d865d333b100084d71700000000220020297b92c238163e820b82486084634b4846b86a3c658d87b9384192e6bea98ec578000000")
+    val unsignedTx = Transaction.read("0200000003b932b0669cd0394d0d5bcc27e01ab8c511f1662a6799925b346c0cf18fca03430200000000fdffffffb932b0669cd0394d0d5bcc27e01ab8c511f1662a6799925b346c0cf18fca03430000000000fdffffffb932b0669cd0394d0d5bcc27e01ab8c511f1662a6799925b346c0cf18fca03430400000000fdffffff03e5effa02000000001600141ca1cca8855bad6bc1ea5436edd8cff10b7e448b1cf0fa020000000016001444cb0c39f93ecc372b5851725bd29d865d333b10f084420601000000220020297b92c238163e820b82486084634b4846b86a3c658d87b9384192e6bea98ec578000000")
     assert(initiatorTx.buildUnsignedTx().txid == unsignedTx.txid)
     assert(nonInitiatorTx.buildUnsignedTx().txid == unsignedTx.txid)
 
     val initiatorSigs = TxSignatures(channelId, unsignedTx, Seq(ScriptWitness(Seq(hex"68656c6c6f2074686572652c2074686973206973206120626974636f6e212121", hex"82012088a820add57dfe5277079d069ca4ad4893c96de91f88ffb981fdc6a2a34d5336c66aff87"))), None)
     val nonInitiatorSigs = TxSignatures(channelId, unsignedTx, Seq(ScriptWitness(Seq(hex"304402207de9ba56bb9f641372e805782575ee840a899e61021c8b1572b3ec1d5b5950e9022069e9ba998915dae193d3c25cb89b5e64370e6a3a7755e7f31cf6d7cbc2a49f6d01", hex"034695f5b7864c580bf11f9f8cb1a94eb336f2ce9ef872d2ae1a90ee276c772484"))), None)
     val initiatorSignedTx = FullySignedSharedTransaction(initiatorTx, initiatorSigs, nonInitiatorSigs, None)
-    assert(initiatorSignedTx.feerate == FeeratePerKw(262 sat))
+    assert(initiatorSignedTx.feerate == FeeratePerKw(224 sat))
     val nonInitiatorSignedTx = FullySignedSharedTransaction(nonInitiatorTx, nonInitiatorSigs, initiatorSigs, None)
-    assert(nonInitiatorSignedTx.feerate == FeeratePerKw(262 sat))
-    val signedTx = Transaction.read("02000000000102b932b0669cd0394d0d5bcc27e01ab8c511f1662a6799925b346c0cf18fca03430200000000fdffffffb932b0669cd0394d0d5bcc27e01ab8c511f1662a6799925b346c0cf18fca03430000000000fdffffff03e5effa02000000001600141ca1cca8855bad6bc1ea5436edd8cff10b7e448b1cf0fa020000000016001444cb0c39f93ecc372b5851725bd29d865d333b100084d71700000000220020297b92c238163e820b82486084634b4846b86a3c658d87b9384192e6bea98ec50247304402207de9ba56bb9f641372e805782575ee840a899e61021c8b1572b3ec1d5b5950e9022069e9ba998915dae193d3c25cb89b5e64370e6a3a7755e7f31cf6d7cbc2a49f6d0121034695f5b7864c580bf11f9f8cb1a94eb336f2ce9ef872d2ae1a90ee276c772484022068656c6c6f2074686572652c2074686973206973206120626974636f6e2121212782012088a820add57dfe5277079d069ca4ad4893c96de91f88ffb981fdc6a2a34d5336c66aff8778000000")
+    assert(nonInitiatorSignedTx.feerate == FeeratePerKw(224 sat))
+    val signedTx = Transaction.read("02000000000103b932b0669cd0394d0d5bcc27e01ab8c511f1662a6799925b346c0cf18fca03430200000000fdffffffb932b0669cd0394d0d5bcc27e01ab8c511f1662a6799925b346c0cf18fca03430000000000fdffffffb932b0669cd0394d0d5bcc27e01ab8c511f1662a6799925b346c0cf18fca03430400000000fdffffff03e5effa02000000001600141ca1cca8855bad6bc1ea5436edd8cff10b7e448b1cf0fa020000000016001444cb0c39f93ecc372b5851725bd29d865d333b10f084420601000000220020297b92c238163e820b82486084634b4846b86a3c658d87b9384192e6bea98ec50247304402207de9ba56bb9f641372e805782575ee840a899e61021c8b1572b3ec1d5b5950e9022069e9ba998915dae193d3c25cb89b5e64370e6a3a7755e7f31cf6d7cbc2a49f6d0121034695f5b7864c580bf11f9f8cb1a94eb336f2ce9ef872d2ae1a90ee276c772484022068656c6c6f2074686572652c2074686973206973206120626974636f6e2121212782012088a820add57dfe5277079d069ca4ad4893c96de91f88ffb981fdc6a2a34d5336c66aff870078000000")
     assert(initiatorSignedTx.signedTx == signedTx)
     assert(initiatorSignedTx.signedTx == nonInitiatorSignedTx.signedTx)
   }

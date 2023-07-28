@@ -251,7 +251,7 @@ object InteractiveTxBuilder {
     case class Remote(serialId: UInt64, amount: Satoshi, pubkeyScript: ByteVector) extends Output with Incoming
 
     /** The shared output can be added by us or by our peer, depending on who initiated the protocol. */
-    case class Shared(serialId: UInt64, pubkeyScript: ByteVector, localAmount: MilliSatoshi, remoteAmount: MilliSatoshi, htlcsAmount: MilliSatoshi = 0 msat) extends Output with Incoming with Outgoing {
+    case class Shared(serialId: UInt64, pubkeyScript: ByteVector, localAmount: MilliSatoshi, remoteAmount: MilliSatoshi, htlcsAmount: MilliSatoshi) extends Output with Incoming with Outgoing {
       // Note that the truncation is a no-op: the sum of balances in a channel must be a satoshi amount.
       override val amount: Satoshi = (localAmount + remoteAmount + htlcsAmount).truncateToSatoshi
     }
