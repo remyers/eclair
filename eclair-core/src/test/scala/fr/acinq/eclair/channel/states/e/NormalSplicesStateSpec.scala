@@ -176,14 +176,9 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
 
     initiateSplice(f, spliceOut_opt = Some(SpliceOut(100_000 sat, defaultSpliceOutScriptPubKey)))
 
-    val fundingTx1 = alice.stateData.asInstanceOf[DATA_NORMAL].commitments.latest.localFundingStatus.signedTx_opt.get
-    val feerate = alice.nodeParams.onChainFeeConf.getFundingFeerate(alice.nodeParams.currentFeerates)
-    val expectedMiningFee = Transactions.weight2fee(feerate, fundingTx1.weight())
-    val actualMiningFee = 1_400_000.sat - alice.stateData.asInstanceOf[DATA_NORMAL].commitments.latest.capacity
-    // fee computation is approximate
-    assert(actualMiningFee - expectedMiningFee < 100.sat || expectedMiningFee - actualMiningFee < 100.sat)
     // initiator pays the fee
-    assert(alice.stateData.asInstanceOf[DATA_NORMAL].commitments.latest.localCommit.spec.toLocal == 700_000_000.msat - actualMiningFee)
+    val fee = spliceOutFee(f, capacity = 1_400_000.sat)
+    assert(alice.stateData.asInstanceOf[DATA_NORMAL].commitments.latest.localCommit.spec.toLocal == 700_000_000.msat - fee)
     assert(alice.stateData.asInstanceOf[DATA_NORMAL].commitments.latest.localCommit.spec.toRemote == 700_000_000.msat)
   }
 
@@ -1521,13 +1516,13 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     Seq((preimage1a, htlc1a), (preimage2a, htlc2a), (preimage1b, htlc1b), (preimage2b, htlc2b))
   }
 
-  def spliceOutFee(f: FixtureParam): Satoshi = {
+  def spliceOutFee(f: FixtureParam, capacity: Satoshi): Satoshi = {
     import f._
 
-    val fundingTx2 = alice.stateData.asInstanceOf[ChannelDataWithCommitments].commitments.latest.localFundingStatus.signedTx_opt.get
+    val fundingTx = alice.stateData.asInstanceOf[ChannelDataWithCommitments].commitments.latest.localFundingStatus.signedTx_opt.get
     val feerate = alice.nodeParams.onChainFeeConf.getFundingFeerate(alice.nodeParams.currentFeerates)
-    val expectedMiningFee = Transactions.weight2fee(feerate, fundingTx2.weight())
-    val actualMiningFee = 1_900_000.sat - alice.stateData.asInstanceOf[ChannelDataWithCommitments].commitments.latest.capacity
+    val expectedMiningFee = Transactions.weight2fee(feerate, fundingTx.weight())
+    val actualMiningFee = capacity - alice.stateData.asInstanceOf[ChannelDataWithCommitments].commitments.latest.capacity
     // fee computation is approximate
     assert(actualMiningFee >= 0.sat && abs(actualMiningFee - expectedMiningFee) < 100.sat)
     actualMiningFee
@@ -1548,7 +1543,7 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
   def resolveHtlcs(f: FixtureParam, htlcs: Seq[(ByteVector32, UpdateAddHtlc)], paySpliceOutFee: Boolean): Assertion = {
     import f._
 
-    val fee = if (paySpliceOutFee) spliceOutFee(f) else 0 sat
+    val fee = if (paySpliceOutFee) spliceOutFee(f, capacity = 1_900_000.sat) else 0 sat
     val Seq((preimage1a, htlc1a), (preimage2a, htlc2a), (preimage1b, htlc1b), (preimage2b, htlc2b)) = htlcs
 
     checkPostSpliceState(f, fee)
@@ -1742,7 +1737,7 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     // claim-main-delayed tx confirms
     watchConfirmedClaimMainDelayed2.replyTo ! WatchTxConfirmedTriggered(BlockHeight(400000), 42, claimMainDelayed2)
 
-    checkPostSpliceState(f, spliceOutFee(f))
+    checkPostSpliceState(f, spliceOutFee(f, capacity = 1_900_000.sat))
 
     // done
     awaitCond(alice.stateName == CLOSED)
