@@ -25,7 +25,7 @@ import fr.acinq.eclair.blockchain.fee.FeeratePerKw
 import fr.acinq.eclair.channel.fund.InteractiveTxBuilder._
 import fr.acinq.eclair.transactions.Transactions
 import fr.acinq.eclair.wire.protocol.TxAddInput
-import fr.acinq.eclair.{Logs, MilliSatoshiLong, UInt64}
+import fr.acinq.eclair.{Logs, UInt64}
 import scodec.bits.ByteVector
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -156,9 +156,8 @@ private class InteractiveTxFunder(replyTo: ActorRef[InteractiveTxFunder.Response
       // force us to add wallet inputs. The caller may manually decrease the output amounts if it wants to actually
       // contribute to the RBF attempt.
       if (fundingParams.isInitiator) {
-        val sharedInput = fundingParams.sharedInput_opt.toSeq.map(sharedInput => Input.Shared(UInt64(0), sharedInput.info.outPoint, 0xfffffffdL, purpose.previousLocalBalance, purpose.previousRemoteBalance))
-        val htlcsAmount = fundingParams.sharedInput_opt.map(_.info.txOut.amount - purpose.previousLocalBalance - purpose.previousRemoteBalance).getOrElse(0 msat)
-        val sharedOutput = Output.Shared(UInt64(0), fundingPubkeyScript, purpose.previousLocalBalance + fundingParams.localContribution, purpose.previousRemoteBalance + fundingParams.remoteContribution, htlcsAmount)
+        val sharedInput = fundingParams.sharedInput_opt.toSeq.map(sharedInput => Input.Shared(UInt64(0), sharedInput.info.outPoint, 0xfffffffdL, purpose.previousLocalBalance + purpose.incomingHtlcsBalance, purpose.previousRemoteBalance + purpose.outgoingHtlcsBalance))
+        val sharedOutput = Output.Shared(UInt64(0), fundingPubkeyScript, purpose.previousLocalBalance + purpose.incomingHtlcsBalance + fundingParams.localContribution, purpose.previousRemoteBalance + purpose.outgoingHtlcsBalance + fundingParams.remoteContribution)
         val nonChangeOutputs = fundingParams.localOutputs.map(txOut => Output.Local.NonChange(UInt64(0), txOut.amount, txOut.publicKeyScript))
         val fundingContributions = sortFundingContributions(fundingParams, sharedInput ++ previousWalletInputs, sharedOutput +: nonChangeOutputs)
         replyTo ! fundingContributions
@@ -233,8 +232,7 @@ private class InteractiveTxFunder(replyTo: ActorRef[InteractiveTxFunder.Response
           val fundingContributions = if (fundingParams.isInitiator) {
             // The initiator is responsible for adding the shared output and the shared input.
             val inputs = inputDetails.usableInputs
-            val htlcsAmount = fundingParams.sharedInput_opt.map(_.info.txOut.amount - purpose.previousLocalBalance - purpose.previousRemoteBalance).getOrElse(0 msat)
-            val fundingOutput = Output.Shared(UInt64(0), fundingPubkeyScript, purpose.previousLocalBalance + fundingParams.localContribution, purpose.previousRemoteBalance + fundingParams.remoteContribution, htlcsAmount)
+            val fundingOutput = Output.Shared(UInt64(0), fundingPubkeyScript, purpose.previousLocalBalance + purpose.incomingHtlcsBalance + fundingParams.localContribution, purpose.previousRemoteBalance + purpose.outgoingHtlcsBalance + fundingParams.remoteContribution)
             val outputs = Seq(fundingOutput) ++ nonChangeOutputs ++ changeOutput_opt.toSeq
             sortFundingContributions(fundingParams, inputs, outputs)
           } else {
@@ -293,7 +291,7 @@ private class InteractiveTxFunder(replyTo: ActorRef[InteractiveTxFunder.Response
       case None => fundingParams.sharedInput_opt match {
         case Some(sharedInput) if sharedInput.info.outPoint == txIn.outPoint =>
           // We don't need to validate the shared input, it comes from a valid lightning channel.
-          Future.successful(Right(Input.Shared(UInt64(0), sharedInput.info.outPoint, txIn.sequence, purpose.previousLocalBalance, purpose.previousRemoteBalance)))
+          Future.successful(Right(Input.Shared(UInt64(0), sharedInput.info.outPoint, txIn.sequence, purpose.previousLocalBalance + purpose.incomingHtlcsBalance, purpose.previousRemoteBalance + purpose.outgoingHtlcsBalance)))
         case _ =>
           for {
             previousTx <- wallet.getTransaction(txIn.outPoint.txid)
