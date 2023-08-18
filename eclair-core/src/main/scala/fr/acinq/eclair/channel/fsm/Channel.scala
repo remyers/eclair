@@ -2621,7 +2621,7 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
         spliceInAmount = cmd.additionalLocalFunding,
         spliceOut = cmd.spliceOutputs,
         targetFeerate = targetFeerate)
-      if (parentCommitment.localCommit.spec.toLocal + fundingContribution < parentCommitment.localChannelReserve(d.commitments.params)) {
+      if (fundingContribution + d.commitments.availableBalanceForSend.truncateToSatoshi < 0.sat) {
         log.warning("cannot do splice: insufficient funds")
         Left(InvalidSpliceRequest(d.channelId))
       } else if (cmd.spliceOut_opt.map(_.scriptPubKey).exists(!MutualClose.isValidFinalScriptPubkey(_, allowAnySegwit = true))) {

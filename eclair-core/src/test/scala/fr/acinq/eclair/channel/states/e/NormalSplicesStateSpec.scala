@@ -185,14 +185,41 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
   test("recv CMD_SPLICE (splice-out, would go below reserve)") { f =>
     import f._
 
+    val availableToSpend = alice.stateData.asInstanceOf[DATA_NORMAL].commitments.availableBalanceForSend
+
     val initialState = alice.stateData.asInstanceOf[DATA_NORMAL]
     assert(initialState.commitments.latest.capacity == 1_500_000.sat)
     assert(initialState.commitments.latest.localCommit.spec.toLocal == 800_000_000.msat)
     assert(initialState.commitments.latest.localCommit.spec.toRemote == 700_000_000.msat)
 
     val sender = TestProbe()
-    val cmd = CMD_SPLICE(sender.ref, spliceIn_opt = None, Some(SpliceOut(790_000 sat, defaultSpliceOutScriptPubKey)))
+    val cmd = CMD_SPLICE(sender.ref, spliceIn_opt = Some(SpliceIn(1000.sat)), Some(SpliceOut(1001.sat + availableToSpend.truncateToSatoshi, defaultSpliceOutScriptPubKey)))
     alice ! cmd
+    sender.expectMsgType[RES_FAILURE[_, _]]
+  }
+
+  test("recv CMD_SPLICE (splice-out, would go below reserve, quiescent)", Tag(ChannelStateTestsTags.Quiescence), Tag(NoMaxHtlcValueInFlight)) { f =>
+    import f._
+
+    val availableToSpend = alice.stateData.asInstanceOf[DATA_NORMAL].commitments.availableBalanceForSend
+
+    // add htlcs to make alice's balance go below reserve
+    addHtlc(1_000.msat, alice, bob, alice2bob, bob2alice)
+    crossSign(alice, bob, alice2bob, bob2alice)
+
+    val initialState = alice.stateData.asInstanceOf[DATA_NORMAL]
+    assert(initialState.commitments.latest.capacity == 1_500_000.sat)
+    assert(initialState.commitments.latest.localCommit.spec.toLocal == 799_999_000.msat)
+    assert(initialState.commitments.latest.localCommit.spec.toRemote == 700_000_000.msat)
+
+    val sender = TestProbe()
+
+    val cmd = CMD_SPLICE(sender.ref, spliceIn_opt = Some(SpliceIn(1000 sat)), Some(SpliceOut(1000.sat + availableToSpend.truncateToSatoshi, defaultSpliceOutScriptPubKey)))
+    alice ! cmd
+    alice2bob.expectMsgType[Stfu]
+    alice2bob.forward(bob)
+    bob2alice.expectMsgType[Stfu]
+    bob2alice.forward(alice)
     sender.expectMsgType[RES_FAILURE[_, _]]
   }
 
