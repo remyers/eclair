@@ -73,10 +73,7 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     val cmd = CMD_SPLICE(sender.ref, spliceIn_opt, spliceOut_opt)
     alice ! cmd
     if (alice.stateData.asInstanceOf[DATA_NORMAL].commitments.params.useQuiescence) {
-      alice2bob.expectMsgType[Stfu]
-      alice2bob.forward(bob)
-      bob2alice.expectMsgType[Stfu]
-      bob2alice.forward(alice)
+      exchangeStfu(f)
     }
     alice2bob.expectMsgType[SpliceInit]
     alice2bob.forward(bob)
@@ -151,6 +148,14 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     exchangeSpliceSigs(f, sender)
   }
 
+  private def exchangeStfu(f: FixtureParam): Unit = {
+    import f._
+    alice2bob.expectMsgType[Stfu]
+    alice2bob.forward(bob)
+    bob2alice.expectMsgType[Stfu]
+    bob2alice.forward(alice)
+  }
+
   test("recv CMD_SPLICE (splice-in)") { f =>
     import f._
 
@@ -185,41 +190,33 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
   test("recv CMD_SPLICE (splice-out, would go below reserve)") { f =>
     import f._
 
-    val availableToSpend = alice.stateData.asInstanceOf[DATA_NORMAL].commitments.availableBalanceForSend
-
     val initialState = alice.stateData.asInstanceOf[DATA_NORMAL]
     assert(initialState.commitments.latest.capacity == 1_500_000.sat)
     assert(initialState.commitments.latest.localCommit.spec.toLocal == 800_000_000.msat)
     assert(initialState.commitments.latest.localCommit.spec.toRemote == 700_000_000.msat)
 
     val sender = TestProbe()
-    val cmd = CMD_SPLICE(sender.ref, spliceIn_opt = Some(SpliceIn(1000.sat)), Some(SpliceOut(1001.sat + availableToSpend.truncateToSatoshi, defaultSpliceOutScriptPubKey)))
+    val cmd = CMD_SPLICE(sender.ref, spliceIn_opt = None, Some(SpliceOut(780_000 sat, defaultSpliceOutScriptPubKey)))
     alice ! cmd
     sender.expectMsgType[RES_FAILURE[_, _]]
   }
 
-  test("recv CMD_SPLICE (splice-out, would go below reserve, quiescent)", Tag(ChannelStateTestsTags.Quiescence), Tag(NoMaxHtlcValueInFlight)) { f =>
+  test("recv CMD_SPLICE (splice-out, would go below reserve, with htlcs)", Tag(ChannelStateTestsTags.Quiescence), Tag(NoMaxHtlcValueInFlight)) { f =>
     import f._
-
-    val availableToSpend = alice.stateData.asInstanceOf[DATA_NORMAL].commitments.availableBalanceForSend
-
-    // add htlcs to make alice's balance go below reserve
-    addHtlc(1_000.msat, alice, bob, alice2bob, bob2alice)
-    crossSign(alice, bob, alice2bob, bob2alice)
 
     val initialState = alice.stateData.asInstanceOf[DATA_NORMAL]
     assert(initialState.commitments.latest.capacity == 1_500_000.sat)
-    assert(initialState.commitments.latest.localCommit.spec.toLocal == 799_999_000.msat)
+    assert(initialState.commitments.latest.localCommit.spec.toLocal == 800_000_000.msat)
     assert(initialState.commitments.latest.localCommit.spec.toRemote == 700_000_000.msat)
 
-    val sender = TestProbe()
+    // Add htlc from Alice to Bob:
+    addHtlc(10_000_000 msat, alice, bob, alice2bob, bob2alice)
+    crossSign(alice, bob, alice2bob, bob2alice)
 
-    val cmd = CMD_SPLICE(sender.ref, spliceIn_opt = Some(SpliceIn(1000 sat)), Some(SpliceOut(1000.sat + availableToSpend.truncateToSatoshi, defaultSpliceOutScriptPubKey)))
+    val sender = TestProbe()
+    val cmd = CMD_SPLICE(sender.ref, spliceIn_opt = None, Some(SpliceOut(770_000 sat, defaultSpliceOutScriptPubKey)))
     alice ! cmd
-    alice2bob.expectMsgType[Stfu]
-    alice2bob.forward(bob)
-    bob2alice.expectMsgType[Stfu]
-    bob2alice.forward(alice)
+    exchangeStfu(f)
     sender.expectMsgType[RES_FAILURE[_, _]]
   }
 
@@ -1770,7 +1767,6 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     awaitCond(alice.stateName == CLOSED)
     assert(Helpers.Closing.isClosed(alice.stateData.asInstanceOf[DATA_CLOSING], None).exists(_.isInstanceOf[LocalClose]))
   }
-
 
   test("force-close with multiple splices (previous active remote) and pending htlcs", Tag(ChannelStateTestsTags.Quiescence)) { f =>
     import f._

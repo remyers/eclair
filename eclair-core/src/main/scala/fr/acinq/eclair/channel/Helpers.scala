@@ -371,25 +371,28 @@ object Helpers {
         fundingAmount = localFundingAmount + remoteFundingAmount,
         toLocal = localFundingAmount.toMilliSatoshi - localPushAmount + remotePushAmount,
         toRemote = remoteFundingAmount.toMilliSatoshi + localPushAmount - remotePushAmount,
+        localHtlcs = Set.empty,
         commitTxFeerate,
         fundingTxIndex = 0,
-        fundingTxHash, fundingTxOutputIndex, remoteFundingPubKey = remoteFundingPubKey, remotePerCommitmentPoint = remoteFirstPerCommitmentPoint, commitmentIndex = 0, Set.empty[DirectedHtlc])
+        fundingTxHash, fundingTxOutputIndex,
+        remoteFundingPubKey = remoteFundingPubKey, remotePerCommitmentPoint = remoteFirstPerCommitmentPoint,
+        commitmentIndex = 0)
 
     /**
      * This creates commitment transactions for both sides at an arbitrary `commitmentIndex` and with (optional) `htlc`
-     * outputs.
+     * outputs. This function should only be used when commitments are synchronized (local and remote htlcs match).
      */
     def makeCommitTxs(keyManager: ChannelKeyManager,
                       params: ChannelParams,
                       fundingAmount: Satoshi,
                       toLocal: MilliSatoshi, toRemote: MilliSatoshi,
+                      localHtlcs: Set[DirectedHtlc],
                       commitTxFeerate: FeeratePerKw,
                       fundingTxIndex: Long,
                       fundingTxHash: ByteVector32, fundingTxOutputIndex: Int,
                       remoteFundingPubKey: PublicKey,
                       remotePerCommitmentPoint: PublicKey,
-                      commitmentIndex: Long,
-                      localHtlcs: Set[DirectedHtlc]): Either[ChannelException, (CommitmentSpec, CommitTx, CommitmentSpec, CommitTx)] = {
+                      commitmentIndex: Long): Either[ChannelException, (CommitmentSpec, CommitTx, CommitmentSpec, CommitTx)] = {
       import params._
       val localSpec = CommitmentSpec(localHtlcs, commitTxFeerate, toLocal = toLocal, toRemote = toRemote)
       val remoteSpec = CommitmentSpec(localHtlcs.map(_.opposite), commitTxFeerate, toLocal = toRemote, toRemote = toLocal)

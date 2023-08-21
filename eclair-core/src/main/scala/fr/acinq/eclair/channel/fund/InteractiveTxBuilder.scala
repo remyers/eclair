@@ -166,9 +166,7 @@ object InteractiveTxBuilder {
     def commitTxFeerate: FeeratePerKw
     def fundingTxIndex: Long
     def localHtlcs: Set[DirectedHtlc]
-    def incomingHtlcsBalance: MilliSatoshi = localHtlcs.collect(DirectedHtlc.incoming).toSeq.map(_.amountMsat).sum
-    def outgoingHtlcsBalance: MilliSatoshi = localHtlcs.collect(DirectedHtlc.outgoing).toSeq.map(_.amountMsat).sum
-    def previousHtlcsBalance: MilliSatoshi = incomingHtlcsBalance + outgoingHtlcsBalance
+    def htlcBalance: MilliSatoshi = localHtlcs.toSeq.map(_.add.amountMsat).sum
   }
   case class FundingTx(commitTxFeerate: FeeratePerKw, remotePerCommitmentPoint: PublicKey) extends Purpose {
     override val previousLocalBalance: MilliSatoshi = 0 msat
@@ -231,7 +229,7 @@ object InteractiveTxBuilder {
     case class Remote(serialId: UInt64, outPoint: OutPoint, txOut: TxOut, sequence: Long) extends Input with Incoming
 
     /** The shared input can be added by us or by our peer, depending on who initiated the protocol. */
-    case class Shared(serialId: UInt64, outPoint: OutPoint, sequence: Long, localAmount: MilliSatoshi, remoteAmount: MilliSatoshi) extends Input with Incoming with Outgoing
+    case class Shared(serialId: UInt64, outPoint: OutPoint, sequence: Long, localAmount: MilliSatoshi, remoteAmount: MilliSatoshi, htlcAmount: MilliSatoshi) extends Input with Incoming with Outgoing
   }
 
   sealed trait Output {
@@ -254,9 +252,9 @@ object InteractiveTxBuilder {
     case class Remote(serialId: UInt64, amount: Satoshi, pubkeyScript: ByteVector) extends Output with Incoming
 
     /** The shared output can be added by us or by our peer, depending on who initiated the protocol. */
-    case class Shared(serialId: UInt64, pubkeyScript: ByteVector, localAmount: MilliSatoshi, remoteAmount: MilliSatoshi) extends Output with Incoming with Outgoing {
+    case class Shared(serialId: UInt64, pubkeyScript: ByteVector, localAmount: MilliSatoshi, remoteAmount: MilliSatoshi, htlcAmount: MilliSatoshi) extends Output with Incoming with Outgoing {
       // Note that the truncation is a no-op: the sum of balances in a channel must be a satoshi amount.
-      override val amount: Satoshi = (localAmount + remoteAmount).truncateToSatoshi
+      override val amount: Satoshi = (localAmount + remoteAmount + htlcAmount).truncateToSatoshi
     }
   }
 
@@ -350,13 +348,14 @@ object InteractiveTxBuilder {
         Behaviors.withMdc(Logs.mdc(remoteNodeId_opt = Some(channelParams.remoteParams.nodeId), channelId_opt = Some(fundingParams.channelId))) {
           Behaviors.receiveMessagePartial {
             case Start(replyTo) =>
-              val nextLocalFundingAmount = purpose.previousLocalBalance + purpose.incomingHtlcsBalance + fundingParams.localContribution
-              val nextRemoteFundingAmount = purpose.previousRemoteBalance + purpose.outgoingHtlcsBalance + fundingParams.remoteContribution
-              if (fundingParams.fundingAmount < fundingParams.dustLimit || fundingParams.fundingAmount < purpose.previousHtlcsBalance.truncateToSatoshi) {
-                replyTo ! LocalFailure(FundingAmountTooLow(channelParams.channelId, fundingParams.fundingAmount, fundingParams.dustLimit + purpose.previousHtlcsBalance.truncateToSatoshi))
+              // Note that pending HTLCs are ignored: splices only affect the main outputs.
+              val nextLocalBalance = purpose.previousLocalBalance + fundingParams.localContribution
+              val nextRemoteBalance = purpose.previousRemoteBalance + fundingParams.remoteContribution
+              if (fundingParams.fundingAmount < fundingParams.dustLimit) {
+                replyTo ! LocalFailure(FundingAmountTooLow(channelParams.channelId, fundingParams.fundingAmount, fundingParams.dustLimit))
                 Behaviors.stopped
-              } else if (nextLocalFundingAmount < 0.msat || nextRemoteFundingAmount < 0.msat) {
-                replyTo ! LocalFailure(InvalidFundingBalances(channelParams.channelId, fundingParams.fundingAmount, nextLocalFundingAmount, nextRemoteFundingAmount))
+              } else if (nextLocalBalance < 0.msat || nextRemoteBalance < 0.msat) {
+                replyTo ! LocalFailure(InvalidFundingBalances(channelParams.channelId, fundingParams.fundingAmount, nextLocalBalance, nextRemoteBalance))
                 Behaviors.stopped
               } else {
                 val actor = new InteractiveTxBuilder(replyTo, nodeParams, channelParams, fundingParams, purpose, localPushAmount, remotePushAmount, wallet, stash, context)
@@ -485,7 +484,7 @@ private class InteractiveTxBuilder(replyTo: ActorRef[InteractiveTxBuilder.Respon
       case None =>
         (addInput.sharedInput_opt, fundingParams.sharedInput_opt) match {
           case (Some(outPoint), Some(sharedInput)) if outPoint == sharedInput.info.outPoint =>
-            Input.Shared(addInput.serialId, outPoint, addInput.sequence, purpose.previousLocalBalance + purpose.incomingHtlcsBalance, purpose.previousRemoteBalance + purpose.outgoingHtlcsBalance)
+            Input.Shared(addInput.serialId, outPoint, addInput.sequence, purpose.previousLocalBalance, purpose.previousRemoteBalance, purpose.htlcBalance)
           case _ =>
             return Left(PreviousTxMissing(fundingParams.channelId, addInput.serialId))
         }
@@ -511,8 +510,7 @@ private class InteractiveTxBuilder(replyTo: ActorRef[InteractiveTxBuilder.Respon
     } else if (!MutualClose.isValidFinalScriptPubkey(addOutput.pubkeyScript, allowAnySegwit = true)) {
       Left(InvalidSpliceOutputScript(fundingParams.channelId, addOutput.serialId, addOutput.pubkeyScript))
     } else if (addOutput.pubkeyScript == fundingPubkeyScript) {
-      val htlcsAmount = fundingParams.sharedInput_opt.map(_.info.txOut.amount - purpose.previousLocalBalance - purpose.previousRemoteBalance).getOrElse(0 msat)
-      Right(Output.Shared(addOutput.serialId, addOutput.pubkeyScript, purpose.previousLocalBalance + purpose.incomingHtlcsBalance + fundingParams.localContribution, purpose.previousRemoteBalance + purpose.outgoingHtlcsBalance + fundingParams.remoteContribution))
+      Right(Output.Shared(addOutput.serialId, addOutput.pubkeyScript, purpose.previousLocalBalance + fundingParams.localContribution, purpose.previousRemoteBalance + fundingParams.remoteContribution, purpose.htlcBalance))
     } else {
       Right(Output.Remote(addOutput.serialId, addOutput.amount, addOutput.pubkeyScript))
     }
@@ -732,13 +730,14 @@ private class InteractiveTxBuilder(replyTo: ActorRef[InteractiveTxBuilder.Respon
     val fundingOutputIndex = fundingTx.txOut.indexWhere(_.publicKeyScript == fundingPubkeyScript)
     Funding.makeCommitTxs(keyManager, channelParams,
       fundingAmount = fundingParams.fundingAmount,
-      toLocal = completeTx.sharedOutput.localAmount - localPushAmount + remotePushAmount - purpose.incomingHtlcsBalance,
-      toRemote = completeTx.sharedOutput.remoteAmount - remotePushAmount + localPushAmount - purpose.outgoingHtlcsBalance,
+      toLocal = completeTx.sharedOutput.localAmount - localPushAmount + remotePushAmount,
+      toRemote = completeTx.sharedOutput.remoteAmount - remotePushAmount + localPushAmount,
+      localHtlcs = purpose.localHtlcs,
       purpose.commitTxFeerate,
       fundingTxIndex = purpose.fundingTxIndex,
       fundingTx.hash, fundingOutputIndex,
       remotePerCommitmentPoint = purpose.remotePerCommitmentPoint, remoteFundingPubKey = fundingParams.remoteFundingPubKey,
-      commitmentIndex = purpose.localCommitIndex, localHtlcs = purpose.localHtlcs) match {
+      commitmentIndex = purpose.localCommitIndex) match {
       case Left(cause) =>
         replyTo ! RemoteFailure(cause)
         unlockAndStop(completeTx)
