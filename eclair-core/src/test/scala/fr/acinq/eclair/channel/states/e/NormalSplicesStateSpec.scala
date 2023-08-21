@@ -39,7 +39,7 @@ import fr.acinq.eclair.transactions.Transactions
 import fr.acinq.eclair.wire.protocol._
 import org.scalatest.funsuite.FixtureAnyFunSuiteLike
 import org.scalatest.time.SpanSugar.convertIntToGrainOfTime
-import org.scalatest.{Assertion, Outcome, Tag}
+import org.scalatest.{Outcome, Tag}
 import scodec.bits.HexStringSyntax
 
 /**
@@ -156,58 +156,64 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     bob2alice.forward(alice)
   }
 
-  private def setupHtlcs(f: FixtureParam): Seq[(ByteVector32, UpdateAddHtlc)] = {
+  case class TestHtlcs(aliceToBob: Seq[(ByteVector32, UpdateAddHtlc)], bobToAlice: Seq[(ByteVector32, UpdateAddHtlc)])
+
+  private def setupHtlcs(f: FixtureParam): TestHtlcs = {
     import f._
 
     // add htlcs in both directions
-    val (preimage1a, htlc1a) = addHtlc(5_000_000 msat, alice, bob, alice2bob, bob2alice)
-    val (preimage2a, htlc2a) = addHtlc(5_000_000 msat, alice, bob, alice2bob, bob2alice)
+    val htlcsAliceToBob = Seq(
+      addHtlc(15_000_000 msat, alice, bob, alice2bob, bob2alice),
+      addHtlc(15_000_000 msat, alice, bob, alice2bob, bob2alice)
+    )
     crossSign(alice, bob, alice2bob, bob2alice)
-    val (preimage1b, htlc1b) = addHtlc(5_000_000 msat, bob, alice, bob2alice, alice2bob)
-    val (preimage2b, htlc2b) = addHtlc(5_000_000 msat, bob, alice, bob2alice, alice2bob)
+    val htlcsBobToAlice = Seq(
+      addHtlc(20_000_000 msat, bob, alice, bob2alice, alice2bob),
+      addHtlc(15_000_000 msat, bob, alice, bob2alice, alice2bob)
+    )
     crossSign(bob, alice, bob2alice, alice2bob)
 
     val initialState = alice.stateData.asInstanceOf[DATA_NORMAL]
     assert(initialState.commitments.latest.capacity == 1_500_000.sat)
-    assert(initialState.commitments.latest.localCommit.spec.toLocal == 790_000_000.msat)
-    assert(initialState.commitments.latest.localCommit.spec.toRemote == 690_000_000.msat)
+    assert(initialState.commitments.latest.localCommit.spec.toLocal == 770_000_000.msat)
+    assert(initialState.commitments.latest.localCommit.spec.toRemote == 665_000_000.msat)
 
-    Seq((preimage1a, htlc1a), (preimage2a, htlc2a), (preimage1b, htlc1b), (preimage2b, htlc2b))
+    TestHtlcs(htlcsAliceToBob, htlcsBobToAlice)
   }
 
   def spliceOutFee(f: FixtureParam, capacity: Satoshi): Satoshi = {
     import f._
 
+    // When we only splice-out, the fees are paid by deducing them from the next funding amount.
     val fundingTx = alice.stateData.asInstanceOf[ChannelDataWithCommitments].commitments.latest.localFundingStatus.signedTx_opt.get
     val feerate = alice.nodeParams.onChainFeeConf.getFundingFeerate(alice.nodeParams.currentFeerates)
     val expectedMiningFee = Transactions.weight2fee(feerate, fundingTx.weight())
     val actualMiningFee = capacity - alice.stateData.asInstanceOf[ChannelDataWithCommitments].commitments.latest.capacity
-    // fee computation is approximate
+    // Fee computation is approximate (signature size isn't constant).
     assert(actualMiningFee >= 0.sat && abs(actualMiningFee - expectedMiningFee) < 100.sat)
     actualMiningFee
   }
 
-  def checkPostSpliceState(f: FixtureParam, fee: Satoshi): Assertion = {
+  def checkPostSpliceState(f: FixtureParam, spliceOutFee: Satoshi): Unit = {
     import f._
 
     // if the swap includes a splice-in, swap-out fees will be paid from bitcoind so final capacity is predictable
     val postSpliceState = alice.stateData.asInstanceOf[ChannelDataWithCommitments]
-    assert(postSpliceState.commitments.latest.capacity == 1_900_000.sat - fee)
-    assert(postSpliceState.commitments.latest.localCommit.spec.toLocal == 1_190_000_000.msat - fee)
-    assert(postSpliceState.commitments.latest.localCommit.spec.toRemote == 690_000_000.msat)
-    assert(postSpliceState.commitments.latest.localCommit.spec.htlcs.collect(incoming).toSeq.map(_.amountMsat).sum == 10_000_000.msat)
-    assert(postSpliceState.commitments.latest.localCommit.spec.htlcs.collect(outgoing).toSeq.map(_.amountMsat).sum == 10_000_000.msat)
+    assert(postSpliceState.commitments.latest.capacity == 1_900_000.sat - spliceOutFee)
+    assert(postSpliceState.commitments.latest.localCommit.spec.toLocal == 1_170_000_000.msat - spliceOutFee)
+    assert(postSpliceState.commitments.latest.localCommit.spec.toRemote == 665_000_000.msat)
+    assert(postSpliceState.commitments.latest.localCommit.spec.htlcs.collect(incoming).toSeq.map(_.amountMsat).sum == 35_000_000.msat)
+    assert(postSpliceState.commitments.latest.localCommit.spec.htlcs.collect(outgoing).toSeq.map(_.amountMsat).sum == 30_000_000.msat)
   }
 
-  def resolveHtlcs(f: FixtureParam, htlcs: Seq[(ByteVector32, UpdateAddHtlc)], paySpliceOutFee: Boolean): Assertion = {
+  def resolveHtlcs(f: FixtureParam, htlcs: TestHtlcs, spliceOutFee: Satoshi): Unit = {
     import f._
 
-    val fee = if (paySpliceOutFee) spliceOutFee(f, capacity = 1_900_000.sat) else 0 sat
-    val Seq((preimage1a, htlc1a), (preimage2a, htlc2a), (preimage1b, htlc1b), (preimage2b, htlc2b)) = htlcs
-
-    checkPostSpliceState(f, fee)
+    checkPostSpliceState(f, spliceOutFee)
 
     // resolve pre-splice HTLCs after splice
+    val Seq((preimage1a, htlc1a), (preimage2a, htlc2a)) = htlcs.aliceToBob
+    val Seq((preimage1b, htlc1b), (preimage2b, htlc2b)) = htlcs.bobToAlice
     fulfillHtlc(htlc1a.id, preimage1a, bob, alice, bob2alice, alice2bob)
     fulfillHtlc(htlc2a.id, preimage2a, bob, alice, bob2alice, alice2bob)
     crossSign(bob, alice, bob2alice, alice2bob)
@@ -220,9 +226,9 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     assert(alice.stateData.asInstanceOf[DATA_NORMAL].commitments.active.head.remoteCommit.spec.htlcs.collect(outgoing).isEmpty)
 
     val finalState = alice.stateData.asInstanceOf[DATA_NORMAL]
-    assert(finalState.commitments.latest.capacity == 1_900_000.sat - fee)
-    assert(finalState.commitments.latest.localCommit.spec.toLocal == 1_200_000_000.msat - fee)
-    assert(finalState.commitments.latest.localCommit.spec.toRemote == 700_000_000.msat)
+    assert(finalState.commitments.latest.capacity == 1_900_000.sat - spliceOutFee)
+    assert(finalState.commitments.latest.localCommit.spec.toLocal == 1_205_000_000.msat - spliceOutFee)
+    assert(finalState.commitments.latest.localCommit.spec.toRemote == 695_000_000.msat)
   }
 
   test("recv CMD_SPLICE (splice-in)") { f =>
@@ -347,7 +353,7 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
 
     initiateSplice(f, spliceIn_opt = Some(SpliceIn(500_000 sat)), spliceOut_opt = Some(SpliceOut(100_000 sat, defaultSpliceOutScriptPubKey)))
 
-    resolveHtlcs(f, htlcs, paySpliceOutFee = false)
+    resolveHtlcs(f, htlcs, spliceOutFee = 0 sat)
   }
 
   test("recv CMD_SPLICE (splice-in + splice-out) with pre and post splice htlcs", Tag(ChannelStateTestsTags.Quiescence)) { f =>
@@ -362,7 +368,7 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     fulfillHtlc(add.id, preimage, alice, bob, alice2bob, bob2alice)
     crossSign(alice, bob, alice2bob, bob2alice)
 
-    resolveHtlcs(f, htlcs, paySpliceOutFee = false)
+    resolveHtlcs(f, htlcs, spliceOutFee = 0 sat)
   }
 
   test("recv CMD_SPLICE (splice-in + splice-out) with pending htlcs, resolved after splice locked", Tag(ChannelStateTestsTags.Quiescence), Tag(ChannelStateTestsTags.AnchorOutputsZeroFeeHtlcTxs)) { f =>
@@ -381,7 +387,7 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     awaitCond(alice.stateData.asInstanceOf[DATA_NORMAL].commitments.active.size == 1)
     awaitCond(bob.stateData.asInstanceOf[DATA_NORMAL].commitments.active.size == 1)
 
-    resolveHtlcs(f, htlcs, paySpliceOutFee = false)
+    resolveHtlcs(f, htlcs, spliceOutFee = 0 sat)
   }
 
   test("recv multiple CMD_SPLICE (splice-in, splice-out) with pending htlcs", Tag(ChannelStateTestsTags.Quiescence)) { f =>
@@ -390,7 +396,7 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     initiateSplice(f, spliceIn_opt = Some(SpliceIn(500_000 sat)))
     initiateSplice(f, spliceOut_opt = Some(SpliceOut(100_000 sat, defaultSpliceOutScriptPubKey)))
 
-    resolveHtlcs(f, htlcs, paySpliceOutFee = true)
+    resolveHtlcs(f, htlcs, spliceOutFee(f, 1_900_000 sat))
   }
 
   test("recv TxAbort (before TxComplete)") { f =>
@@ -1008,7 +1014,7 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     reconnect(f)
     exchangeSpliceSigs(f, sender)
 
-    resolveHtlcs(f, htlcs, paySpliceOutFee = false)
+    resolveHtlcs(f, htlcs, spliceOutFee = 0 sat)
   }
 
   test("disconnect (commit_sig received by alice)") { f =>
@@ -1054,7 +1060,7 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     reconnect(f)
     exchangeSpliceSigs(f, sender)
 
-    resolveHtlcs(f, htlcs, paySpliceOutFee = false)
+    resolveHtlcs(f, htlcs, spliceOutFee = 0 sat)
   }
 
   test("disconnect (tx_signatures sent by bob)") { f =>
@@ -1103,7 +1109,7 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     reconnect(f, interceptFundingDeeplyBuried = false)
     exchangeSpliceSigs(f, sender)
 
-    resolveHtlcs(f, htlcs, paySpliceOutFee = false)
+    resolveHtlcs(f, htlcs, spliceOutFee = 0 sat)
   }
 
   test("disconnect (tx_signatures received by alice)") { f =>
@@ -1163,7 +1169,7 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     alice2bob.expectMsgType[TxSignatures]
     alice2bob.forward(bob)
 
-    resolveHtlcs(f, htlcs, paySpliceOutFee = false)
+    resolveHtlcs(f, htlcs, spliceOutFee = 0 sat)
   }
 
   test("don't resend splice_locked when zero-conf channel confirms", Tag(ChannelStateTestsTags.ZeroConf), Tag(ChannelStateTestsTags.AnchorOutputsZeroFeeHtlcTxs)) { f =>
@@ -1486,7 +1492,7 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     // claim-main tx confirms
     watchConfirmedClaimMain.replyTo ! WatchTxConfirmedTriggered(BlockHeight(400000), 42, claimMain)
 
-    checkPostSpliceState(f, fee = 0.sat)
+    checkPostSpliceState(f, spliceOutFee = 0 sat)
 
     // done
     awaitCond(alice.stateName == CLOSED)
@@ -1607,7 +1613,7 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     assert(alice2blockchain.expectMsgType[WatchTxConfirmed].txId == aliceMainPenalty1.txid)
     alice ! WatchTxConfirmedTriggered(BlockHeight(400000), 42, aliceMainPenalty1)
 
-    checkPostSpliceState(f, fee = 0.sat)
+    checkPostSpliceState(f, spliceOutFee = 0 sat)
 
     // done
     awaitCond(alice.stateName == CLOSED)
@@ -1791,7 +1797,7 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     watchConfirmedClaimMain.replyTo ! WatchTxConfirmedTriggered(BlockHeight(400000), 42, claimMain)
 
     // splice 2 claimed with bob's payment
-    checkPostSpliceState(f, fee = 0.sat)
+    checkPostSpliceState(f, spliceOutFee = 0 sat)
 
     // done
     awaitCond(alice.stateName == CLOSED)
@@ -1986,7 +1992,7 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     alice ! WatchTxConfirmedTriggered(BlockHeight(400000), 42, aliceMainPenalty1)
 
     // alice's final commitment includes the initial htlcs, but not bob's payment
-    checkPostSpliceState(f, fee = 0.sat)
+    checkPostSpliceState(f, spliceOutFee = 0 sat)
 
     // done
     awaitCond(alice.stateName == CLOSED)
