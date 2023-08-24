@@ -1483,6 +1483,11 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
 
     // we're back to the normal handling of remote commit
     val claimMain = alice2blockchain.expectMsgType[PublishFinalTx].tx
+
+    // alice publishes two htlc timeout transactions
+    alice2blockchain.expectMsgType[PublishReplaceableTx]
+    alice2blockchain.expectMsgType[PublishReplaceableTx]
+
     val watchConfirmedRemoteCommit = alice2blockchain.expectMsgType[WatchTxConfirmed]
     assert(watchConfirmedRemoteCommit.txId == bobCommitTx1.txid)
     // this one fires immediately, tx is already confirmed
@@ -1494,9 +1499,8 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
 
     checkPostSpliceState(f, spliceOutFee = 0 sat)
 
-    // done
-    awaitCond(alice.stateName == CLOSED)
-    assert(Helpers.Closing.isClosed(alice.stateData.asInstanceOf[DATA_CLOSING], None).exists(_.isInstanceOf[RemoteClose]))
+    // handle force close for splice state normally
+    awaitCond(alice.stateName == CLOSING)
   }
 
   test("force-close with multiple splices (previous active revoked)") { f =>
@@ -1560,7 +1564,7 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
   test("force-close with multiple splices (previous active revoked) and pending htlcs", Tag(ChannelStateTestsTags.Quiescence)) { f =>
     import f._
 
-    setupHtlcs(f)
+    val htlcs = setupHtlcs(f)
 
     // pay 10_000_000 msat to bob that will be paid back to alice after the splices
     initiateSplice(f, spliceIn_opt = Some(SpliceIn(500_000 sat, pushAmount = 10_000_000 msat)), spliceOut_opt = Some(SpliceOut(100_000 sat, defaultSpliceOutScriptPubKey)))
@@ -1592,8 +1596,15 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     assert(alice2blockchain.expectMsgType[WatchAlternativeCommitTxConfirmed].txId == bobRevokedCommitTx.txid)
     val aliceCommitTx2 = assertPublished(alice2blockchain, "commit-tx")
     val claimMainDelayed2 = assertPublished(alice2blockchain, "local-main-delayed")
+
+    htlcs.aliceToBob.foreach(_ => assertPublished(alice2blockchain, "htlc-timeout"))
+
     assert(alice2blockchain.expectMsgType[WatchTxConfirmed].txId == aliceCommitTx2.txid)
     assert(alice2blockchain.expectMsgType[WatchTxConfirmed].txId == claimMainDelayed2.txid)
+
+    htlcs.aliceToBob.foreach(_ => assert(alice2blockchain.expectMsgType[WatchOutputSpent].txId == aliceCommitTx2.txid))
+    htlcs.bobToAlice.foreach(_ => assert(alice2blockchain.expectMsgType[WatchOutputSpent].txId == aliceCommitTx2.txid))
+
     alice2blockchain.expectNoMessage(100 millis)
 
     // bob's revoked tx wins
@@ -1601,9 +1612,17 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     // alice reacts by punishing bob
     val aliceClaimMain1 = assertPublished(alice2blockchain, "remote-main")
     val aliceMainPenalty1 = assertPublished(alice2blockchain, "main-penalty")
+
+    htlcs.aliceToBob.foreach(_ => assertPublished(alice2blockchain, "htlc-penalty") )
+    htlcs.bobToAlice.foreach(_ => assertPublished(alice2blockchain, "htlc-penalty") )
+
     assert(alice2blockchain.expectMsgType[WatchTxConfirmed].txId == bobRevokedCommitTx.txid)
     assert(alice2blockchain.expectMsgType[WatchTxConfirmed].txId == aliceClaimMain1.txid)
     assert(alice2blockchain.expectMsgType[WatchOutputSpent].txId == bobRevokedCommitTx.txid)
+
+    htlcs.aliceToBob.foreach(_ => assert(alice2blockchain.expectMsgType[WatchOutputSpent].txId == bobRevokedCommitTx.txid))
+    htlcs.bobToAlice.foreach(_ => assert(alice2blockchain.expectMsgType[WatchOutputSpent].txId == bobRevokedCommitTx.txid))
+
     alice2blockchain.expectNoMessage(100 millis)
 
     // both tx confirm
@@ -1615,9 +1634,8 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
 
     checkPostSpliceState(f, spliceOutFee = 0 sat)
 
-    // done
-    awaitCond(alice.stateName == CLOSED)
-    assert(Helpers.Closing.isClosed(alice.stateData.asInstanceOf[DATA_CLOSING], None).exists(_.isInstanceOf[RevokedClose]))
+    // handle force close for splice state normally
+    awaitCond(alice.stateName == CLOSING)
   }
 
   test("force-close with multiple splices (inactive remote)", Tag(ChannelStateTestsTags.ZeroConf), Tag(ChannelStateTestsTags.AnchorOutputsZeroFeeHtlcTxs)) { f =>
@@ -1712,7 +1730,7 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
   test("force-close with multiple splices (inactive remote) and pending htlcs", Tag(ChannelStateTestsTags.Quiescence), Tag(ChannelStateTestsTags.ZeroConf), Tag(ChannelStateTestsTags.AnchorOutputsZeroFeeHtlcTxs)) { f =>
     import f._
 
-    setupHtlcs(f)
+    val htlcs = setupHtlcs(f)
 
     // pay 10_000_000 msat to bob that will be paid back to alice after the splices
     initiateSplice(f, spliceIn_opt = Some(SpliceIn(500_000 sat, pushAmount = 10_000_000 msat)), spliceOut_opt = Some(SpliceOut(100_000 sat, defaultSpliceOutScriptPubKey)))
@@ -1787,6 +1805,10 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     alice ! WatchAlternativeCommitTxConfirmedTriggered(BlockHeight(400000), 42, bobCommitTx1)
     // we're back to the normal handling of remote commit
     val claimMain = alice2blockchain.expectMsgType[PublishFinalTx].tx
+
+    // alice publishes two htlc timeout transactions
+    htlcs.aliceToBob.foreach(_ => assertPublished(alice2blockchain, "claim-htlc-timeout"))
+
     val watchConfirmedRemoteCommit = alice2blockchain.expectMsgType[WatchTxConfirmed]
     assert(watchConfirmedRemoteCommit.txId == bobCommitTx1.txid)
     // this one fires immediately, tx is already confirmed
@@ -1799,9 +1821,8 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     // splice 2 claimed with bob's payment
     checkPostSpliceState(f, spliceOutFee = 0 sat)
 
-    // done
-    awaitCond(alice.stateName == CLOSED)
-    assert(Helpers.Closing.isClosed(alice.stateData.asInstanceOf[DATA_CLOSING], None).exists(_.isInstanceOf[RemoteClose]))
+    // handle force close for splice state normally
+    awaitCond(alice.stateName == CLOSING)
   }
 
   test("force-close with multiple splices (inactive revoked)", Tag(ChannelStateTestsTags.ZeroConf), Tag(ChannelStateTestsTags.AnchorOutputsZeroFeeHtlcTxs)) { f =>
@@ -1898,7 +1919,7 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
   test("force-close with multiple splices (inactive revoked) and pending htlcs", Tag(ChannelStateTestsTags.ZeroConf), Tag(ChannelStateTestsTags.AnchorOutputsZeroFeeHtlcTxs), Tag(ChannelStateTestsTags.Quiescence)) { f =>
     import f._
 
-    setupHtlcs(f)
+    val htlcs = setupHtlcs(f)
 
     initiateSplice(f, spliceIn_opt = Some(SpliceIn(500_000 sat, pushAmount = 0 msat)), spliceOut_opt = Some(SpliceOut(100_000 sat, defaultSpliceOutScriptPubKey)))
     val fundingTx1 = alice.stateData.asInstanceOf[DATA_NORMAL].commitments.latest.localFundingStatus.signedTx_opt.get
@@ -1979,9 +2000,17 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     // alice reacts by punishing bob
     val aliceClaimMain1 = assertPublished(alice2blockchain, "remote-main-delayed")
     val aliceMainPenalty1 = assertPublished(alice2blockchain, "main-penalty")
+
+    htlcs.aliceToBob.foreach(_ => assertPublished(alice2blockchain, "htlc-penalty"))
+    htlcs.bobToAlice.foreach(_ => assertPublished(alice2blockchain, "htlc-penalty"))
+
     assert(alice2blockchain.expectMsgType[WatchTxConfirmed].txId == bobRevokedCommitTx.txid)
     assert(alice2blockchain.expectMsgType[WatchTxConfirmed].txId == aliceClaimMain1.txid)
     assert(alice2blockchain.expectMsgType[WatchOutputSpent].txId == bobRevokedCommitTx.txid)
+
+    htlcs.aliceToBob.foreach(_ => assert(alice2blockchain.expectMsgType[WatchOutputSpent].txId == bobRevokedCommitTx.txid))
+    htlcs.bobToAlice.foreach(_ => assert(alice2blockchain.expectMsgType[WatchOutputSpent].txId == bobRevokedCommitTx.txid))
+
     alice2blockchain.expectNoMessage(100 millis)
 
     // both tx confirm
@@ -1994,9 +2023,8 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     // alice's final commitment includes the initial htlcs, but not bob's payment
     checkPostSpliceState(f, spliceOutFee = 0 sat)
 
-    // done
-    awaitCond(alice.stateName == CLOSED)
-    assert(Helpers.Closing.isClosed(alice.stateData.asInstanceOf[DATA_CLOSING], None).exists(_.isInstanceOf[RevokedClose]))
+    // handle force close for splice state normally
+    awaitCond(alice.stateName == CLOSING)
   }
 
   test("put back watches after restart") { f =>
