@@ -123,7 +123,7 @@ class ChannelCodecs4Spec extends AnyFunSuite {
     val fundingInput = InputInfo(OutPoint(randomBytes32(), 3), TxOut(175_000 sat, Script.pay2wpkh(randomKey().publicKey)), Nil)
     val fundingTx = SharedTransaction(
       sharedInput_opt = None,
-      sharedOutput = InteractiveTxBuilder.Output.Shared(UInt64(8), ByteVector.empty, 100_000_600 msat, 74_000_400 msat, 0 msat),
+      sharedOutput = InteractiveTxBuilder.Output.Shared(UInt64(8), ByteVector.empty, 174_001_000 sat),
       localInputs = Nil, remoteInputs = Nil,
       localOutputs = Nil, remoteOutputs = Nil,
       lockTime = 0
@@ -137,7 +137,8 @@ class ChannelCodecs4Spec extends AnyFunSuite {
       fundingTxIndex = 0,
       PartiallySignedSharedTransaction(fundingTx, TxSignatures(channelId, randomBytes32(), Nil)),
       Left(UnsignedLocalCommit(0, CommitmentSpec(Set.empty, FeeratePerKw(1000 sat), 100_000_000 msat, 75_000_000 msat), commitTx, Nil)),
-      RemoteCommit(0, CommitmentSpec(Set.empty, FeeratePerKw(1000 sat), 75_000_000 msat, 100_000_000 msat), randomBytes32(), randomKey().publicKey)
+      RemoteCommit(0, CommitmentSpec(Set.empty, FeeratePerKw(1000 sat), 75_000_000 msat, 100_000_000 msat), randomBytes32(), randomKey().publicKey),
+      signFirst = true
     )
     val testCases = Map(
       RbfStatus.NoRbf -> RbfStatus.NoRbf,

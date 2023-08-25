@@ -2,7 +2,7 @@ package fr.acinq.eclair.wire.internal.channel.version4
 
 import fr.acinq.bitcoin.scalacompat.Crypto.PublicKey
 import fr.acinq.bitcoin.scalacompat.DeterministicWallet.KeyPath
-import fr.acinq.bitcoin.scalacompat.{OutPoint, ScriptWitness, Transaction, TxOut}
+import fr.acinq.bitcoin.scalacompat.{OutPoint, Satoshi, ScriptWitness, Transaction, TxOut}
 import fr.acinq.eclair.blockchain.fee.{ConfirmationPriority, ConfirmationTarget}
 import fr.acinq.eclair.channel.LocalFundingStatus._
 import fr.acinq.eclair.channel._
@@ -14,10 +14,11 @@ import fr.acinq.eclair.transactions.{CommitmentSpec, DirectedHtlc, IncomingHtlc,
 import fr.acinq.eclair.wire.protocol.CommonCodecs._
 import fr.acinq.eclair.wire.protocol.LightningMessageCodecs._
 import fr.acinq.eclair.wire.protocol.{UpdateAddHtlc, UpdateMessage}
-import fr.acinq.eclair.{BlockHeight, FeatureSupport, Features, MilliSatoshiLong, PermanentChannelFeature, channel}
+import fr.acinq.eclair.{BlockHeight, FeatureSupport, Features, PermanentChannelFeature, channel}
 import scodec.bits.{BitVector, ByteVector}
 import scodec.codecs._
 import scodec.{Attempt, Codec}
+import shapeless.{::, HNil}
 
 private[channel] object ChannelCodecs4 {
 
@@ -247,40 +248,39 @@ private[channel] object ChannelCodecs4 {
         ("targetFeerate" | feeratePerKw) ::
         ("requireConfirmedInputs" | requireConfirmedInputsCodec)).as[InteractiveTxBuilder.InteractiveTxParams]
 
+    private val sumLocalAndRemoteCodec: Codec[Satoshi] =
+      (("localAmount" | millisatoshi) ::
+        ("remoteAmount" | millisatoshi)).map {
+        case localAmount :: remoteAmount :: HNil => (localAmount + remoteAmount).truncateToSatoshi
+      }.decodeOnly
+
     // This codec was used by a first prototype version of splicing that only worked without HTLCs.
     private val sharedInteractiveTxInputWithoutHtlcsCodec: Codec[InteractiveTxBuilder.Input.Shared] = (
       ("serialId" | uint64) ::
         ("outPoint" | outPointCodec) ::
         ("sequence" | uint32) ::
-        ("localAmount" | millisatoshi) ::
-        ("remoteAmount" | millisatoshi) ::
-        ("htlcAmount" | provide(0 msat))).as[InteractiveTxBuilder.Input.Shared]
+        ("amount" | sumLocalAndRemoteCodec)).as[InteractiveTxBuilder.Input.Shared]
 
     private val sharedInteractiveTxInputWithHtlcsCodec: Codec[InteractiveTxBuilder.Input.Shared] = (
       ("serialId" | uint64) ::
         ("outPoint" | outPointCodec) ::
         ("sequence" | uint32) ::
-        ("localAmount" | millisatoshi) ::
-        ("remoteAmount" | millisatoshi) ::
-        ("htlcAmount" | millisatoshi)).as[InteractiveTxBuilder.Input.Shared]
+        ("amount" | satoshi)).as[InteractiveTxBuilder.Input.Shared]
 
     private val sharedInteractiveTxInputCodec: Codec[InteractiveTxBuilder.Input.Shared] = discriminated[InteractiveTxBuilder.Input.Shared].by(byte)
       .typecase(0x02, sharedInteractiveTxInputWithHtlcsCodec)
       .typecase(0x01, sharedInteractiveTxInputWithoutHtlcsCodec)
 
+    // This codec was used by a first prototype version of splicing that only worked without HTLCs.
     private val sharedInteractiveTxOutputWithoutHtlcsCodec: Codec[InteractiveTxBuilder.Output.Shared] = (
       ("serialId" | uint64) ::
         ("scriptPubKey" | lengthDelimited(bytes)) ::
-        ("localAmount" | millisatoshi) ::
-        ("remoteAmount" | millisatoshi) ::
-        ("htlcAmount" | provide(0 msat))).as[InteractiveTxBuilder.Output.Shared]
+        ("amount" | sumLocalAndRemoteCodec)).as[InteractiveTxBuilder.Output.Shared]
 
     private val sharedInteractiveTxOutputWithHtlcsCodec: Codec[InteractiveTxBuilder.Output.Shared] = (
       ("serialId" | uint64) ::
         ("scriptPubKey" | lengthDelimited(bytes)) ::
-        ("localAmount" | millisatoshi) ::
-        ("remoteAmount" | millisatoshi) ::
-        ("htlcAmount" | millisatoshi)).as[InteractiveTxBuilder.Output.Shared]
+        ("amount" | satoshi)).as[InteractiveTxBuilder.Output.Shared]
 
     private val sharedInteractiveTxOutputCodec: Codec[InteractiveTxBuilder.Output.Shared] = discriminated[InteractiveTxBuilder.Output.Shared].by(byte)
       .typecase(0x02, sharedInteractiveTxOutputWithHtlcsCodec)
@@ -517,12 +517,26 @@ private[channel] object ChannelCodecs4 {
           ("commitTx" | commitTxCodec) ::
           ("htlcTxs" | listOfN(uint16, htlcTxCodec))).as[UnsignedLocalCommit]
 
-      val waitingForSigsCodec: Codec[InteractiveTxSigningSession.WaitingForSigs] = (
+      // This codec was used by a first prototype version of splicing that only worked without HTLCs.
+      val waitingForSigsWithoutHtlcsCodec: Codec[InteractiveTxSigningSession.WaitingForSigs] = (
         ("fundingParams" | fundingParamsCodec) ::
           ("fundingTxIndex" | uint32) ::
           ("fundingTx" | partiallySignedSharedTransactionCodec) ::
           ("localCommit" | either(bool8, unsignedLocalCommitCodec, localCommitCodec(commitmentSpecCodec))) ::
-          ("remoteCommit" | remoteCommitCodec(commitmentSpecCodec))).as[InteractiveTxSigningSession.WaitingForSigs]
+          ("remoteCommit" | remoteCommitCodec(commitmentSpecCodec)) ::
+          ("signFirst" | provide(true))).as[InteractiveTxSigningSession.WaitingForSigs]
+
+      val waitingForSigsWithHtlcsCodec: Codec[InteractiveTxSigningSession.WaitingForSigs] = (
+        ("fundingParams" | fundingParamsCodec) ::
+          ("fundingTxIndex" | uint32) ::
+          ("fundingTx" | partiallySignedSharedTransactionCodec) ::
+          ("localCommit" | either(bool8, unsignedLocalCommitCodec, localCommitCodec(commitmentSpecCodec))) ::
+          ("remoteCommit" | remoteCommitCodec(commitmentSpecCodec)) ::
+          ("signFirst" | bool)).as[InteractiveTxSigningSession.WaitingForSigs]
+
+      val waitingForSigsCodec: Codec[InteractiveTxSigningSession.WaitingForSigs] = discriminated[InteractiveTxSigningSession.WaitingForSigs].by(byte)
+        .typecase(0x02, waitingForSigsWithHtlcsCodec)
+        .typecase(0x01, waitingForSigsWithoutHtlcsCodec)
 
       waitingForSigsCodec
     }

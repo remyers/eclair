@@ -17,6 +17,7 @@
 package fr.acinq.eclair.channel.fsm
 
 import fr.acinq.bitcoin.scalacompat.{Transaction, TxIn}
+import fr.acinq.eclair.NotificationsLogger
 import fr.acinq.eclair.NotificationsLogger.NotifyNodeOperator
 import fr.acinq.eclair.blockchain.CurrentBlockHeight
 import fr.acinq.eclair.channel.Helpers.Closing
@@ -26,7 +27,6 @@ import fr.acinq.eclair.channel.fsm.Channel.BITCOIN_FUNDING_DOUBLE_SPENT
 import fr.acinq.eclair.channel.fund.InteractiveTxBuilder._
 import fr.acinq.eclair.channel.fund.{InteractiveTxBuilder, InteractiveTxSigningSession}
 import fr.acinq.eclair.wire.protocol.{ChannelReady, Error}
-import fr.acinq.eclair.{Features, NotificationsLogger}
 
 import scala.concurrent.Future
 import scala.util.{Failure, Success}
@@ -50,7 +50,7 @@ trait DualFundingHandlers extends CommonFundingHandlers {
         // Note that we don't use wallet.commit because we don't want to rollback on failure, since our peer may be able
         // to publish and we may be able to RBF.
         wallet.publishTransaction(fundingTx.signedTx).onComplete {
-          case Success(_) => context.system.eventStream.publish(TransactionPublished(dualFundedTx.fundingParams.channelId, remoteNodeId, fundingTx.signedTx, fundingTx.tx.localFees.truncateToSatoshi, "funding"))
+          case Success(_) => context.system.eventStream.publish(TransactionPublished(dualFundedTx.fundingParams.channelId, remoteNodeId, fundingTx.signedTx, dualFundedTx.localFees, "funding"))
           case Failure(t) => log.warning("error while publishing funding tx: {}", t.getMessage) // tx may be published by our peer, we can't fail-fast
         }
     }

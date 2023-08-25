@@ -426,6 +426,7 @@ object LocalFundingStatus {
   case class SingleFundedUnconfirmedFundingTx(signedTx_opt: Option[Transaction]) extends UnconfirmedFundingTx with NotLocked
   case class DualFundedUnconfirmedFundingTx(sharedTx: SignedSharedTransaction, createdAt: BlockHeight, fundingParams: InteractiveTxParams) extends UnconfirmedFundingTx with NotLocked {
     override def signedTx_opt: Option[Transaction] = sharedTx.signedTx_opt
+    val localFees: Satoshi = sharedTx.tx.localInputsAmount - sharedTx.tx.localOutputsAmount - fundingParams.localContribution
   }
   case class ZeroconfPublishedFundingTx(tx: Transaction) extends UnconfirmedFundingTx with Locked {
     override val signedTx_opt: Option[Transaction] = Some(tx)

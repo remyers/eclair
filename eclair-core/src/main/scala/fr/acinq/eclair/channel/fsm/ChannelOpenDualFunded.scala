@@ -334,7 +334,7 @@ trait ChannelOpenDualFunded extends DualFundingHandlers with ErrorHandlers {
       case InteractiveTxBuilder.SendMessage(msg) => stay() sending msg
       case InteractiveTxBuilder.Succeeded(status, commitSig) =>
         d.deferred.foreach(self ! _)
-        d.replyTo_opt.foreach(_ ! OpenChannelResponse.Created(d.channelId, status.fundingTx.txId, status.fundingTx.tx.localFees.truncateToSatoshi))
+        d.replyTo_opt.foreach(_ ! OpenChannelResponse.Created(d.channelId, status.fundingTx.txId, status.localFees))
         val d1 = DATA_WAIT_FOR_DUAL_FUNDING_SIGNED(d.channelParams, d.secondRemotePerCommitmentPoint, d.localPushAmount, d.remotePushAmount, status, None)
         goto(WAIT_FOR_DUAL_FUNDING_SIGNED) using d1 storing() sending commitSig
       case f: InteractiveTxBuilder.Failed =>
@@ -656,7 +656,7 @@ trait ChannelOpenDualFunded extends DualFundingHandlers with ErrorHandlers {
           msg match {
             case InteractiveTxBuilder.SendMessage(msg) => stay() sending msg
             case InteractiveTxBuilder.Succeeded(signingSession, commitSig) =>
-              cmd_opt.foreach(cmd => cmd.replyTo ! RES_BUMP_FUNDING_FEE(rbfIndex = d.previousFundingTxs.length, signingSession.fundingTx.txId, signingSession.fundingTx.tx.localFees.truncateToSatoshi))
+              cmd_opt.foreach(cmd => cmd.replyTo ! RES_BUMP_FUNDING_FEE(rbfIndex = d.previousFundingTxs.length, signingSession.fundingTx.txId, signingSession.localFees))
               remoteCommitSig_opt.foreach(self ! _)
               val d1 = d.copy(rbfStatus = RbfStatus.RbfWaitingForSigs(signingSession))
               stay() using d1 storing() sending commitSig
