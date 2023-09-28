@@ -166,24 +166,66 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     import f._
 
     if (useQuiescence(f)) {
+      // Alice and Bob asynchronously exchange HTLCs, which makes their commit indices diverge.
+      val sCommitIndex = alice.stateData.asInstanceOf[ChannelDataWithCommitments].commitments.localCommitIndex
+      val rCommitIndex = bob.stateData.asInstanceOf[ChannelDataWithCommitments].commitments.localCommitIndex
+      val a1 = addHtlc(15_000_000 msat, alice, bob, alice2bob, bob2alice)
+      alice ! CMD_SIGN()
+      alice2bob.expectMsgType[CommitSig]
+      val b1 = addHtlc(20_000_000 msat, bob, alice, bob2alice, alice2bob)
+      alice2bob.forward(bob)
+      bob2alice.expectMsgType[RevokeAndAck]
+      bob2alice.forward(alice)
+      bob2alice.expectMsgType[CommitSig]
+      bob2alice.forward(alice)
+      alice2bob.expectMsgType[RevokeAndAck]
+      alice2bob.forward(bob)
+      alice2bob.expectMsgType[CommitSig]
+      alice2bob.forward(bob)
+      alice2bob.expectNoMessage(100 millis)
+      bob2alice.expectMsgType[RevokeAndAck]
+      bob2alice.forward(alice)
+      bob2alice.expectNoMessage(100 millis)
+
+      eventually {
+        assert(alice.stateData.asInstanceOf[ChannelDataWithCommitments].commitments.localCommitIndex == sCommitIndex + 1)
+        assert(alice.stateData.asInstanceOf[ChannelDataWithCommitments].commitments.remoteCommitIndex == rCommitIndex + 2)
+        assert(bob.stateData.asInstanceOf[ChannelDataWithCommitments].commitments.localCommitIndex == rCommitIndex + 2)
+        assert(bob.stateData.asInstanceOf[ChannelDataWithCommitments].commitments.remoteCommitIndex == sCommitIndex + 1)
+      }
+
       // add htlcs in both directions
-      val htlcsAliceToBob = Seq(
-        addHtlc(15_000_000 msat, alice, bob, alice2bob, bob2alice),
-        addHtlc(15_000_000 msat, alice, bob, alice2bob, bob2alice)
-      )
-      crossSign(alice, bob, alice2bob, bob2alice)
-      val htlcsBobToAlice = Seq(
-        addHtlc(20_000_000 msat, bob, alice, bob2alice, alice2bob),
-        addHtlc(15_000_000 msat, bob, alice, bob2alice, alice2bob)
-      )
-      crossSign(bob, alice, bob2alice, alice2bob)
+      val a2 = addHtlc(15_000_000 msat, alice, bob, alice2bob, bob2alice)
+      alice ! CMD_SIGN()
+      alice2bob.expectMsgType[CommitSig]
+      val b2 = addHtlc(15_000_000 msat, bob, alice, bob2alice, alice2bob)
+      alice2bob.forward(bob)
+      bob2alice.expectMsgType[RevokeAndAck]
+      bob2alice.forward(alice)
+      bob2alice.expectMsgType[CommitSig]
+      bob2alice.forward(alice)
+      alice2bob.expectMsgType[RevokeAndAck]
+      alice2bob.forward(bob)
+      alice2bob.expectMsgType[CommitSig]
+      alice2bob.forward(bob)
+      alice2bob.expectNoMessage(100 millis)
+      bob2alice.expectMsgType[RevokeAndAck]
+      bob2alice.forward(alice)
+      bob2alice.expectNoMessage(100 millis)
 
       val initialState = alice.stateData.asInstanceOf[DATA_NORMAL]
       assert(initialState.commitments.latest.capacity == 1_500_000.sat)
       assert(initialState.commitments.latest.localCommit.spec.toLocal == 770_000_000.msat)
       assert(initialState.commitments.latest.localCommit.spec.toRemote == 665_000_000.msat)
 
-      TestHtlcs(htlcsAliceToBob, htlcsBobToAlice)
+      eventually {
+        assert(alice.stateData.asInstanceOf[ChannelDataWithCommitments].commitments.localCommitIndex == sCommitIndex + 2)
+        assert(alice.stateData.asInstanceOf[ChannelDataWithCommitments].commitments.remoteCommitIndex == rCommitIndex + 4)
+        assert(bob.stateData.asInstanceOf[ChannelDataWithCommitments].commitments.localCommitIndex == rCommitIndex + 4)
+        assert(bob.stateData.asInstanceOf[ChannelDataWithCommitments].commitments.remoteCommitIndex == sCommitIndex + 2)
+      }
+
+      TestHtlcs(Seq(a1, a2), Seq(b1,b2))
     } else {
       val initialState = alice.stateData.asInstanceOf[DATA_NORMAL]
       assert(initialState.commitments.latest.capacity == 1_500_000.sat)
