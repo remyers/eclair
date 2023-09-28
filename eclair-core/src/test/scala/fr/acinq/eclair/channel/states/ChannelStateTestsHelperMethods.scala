@@ -457,16 +457,16 @@ trait ChannelStateTestsBase extends Assertions with Eventually {
       r2s.forward(s)
       eventually {
         assert(s.stateData.asInstanceOf[ChannelDataWithCommitments].commitments.localCommitIndex == sCommitIndex + 1)
-        assert(s.stateData.asInstanceOf[ChannelDataWithCommitments].commitments.remoteCommitIndex == sCommitIndex + 2)
+        assert(s.stateData.asInstanceOf[ChannelDataWithCommitments].commitments.remoteCommitIndex == rCommitIndex + 2)
         assert(r.stateData.asInstanceOf[ChannelDataWithCommitments].commitments.localCommitIndex == rCommitIndex + 2)
-        assert(r.stateData.asInstanceOf[ChannelDataWithCommitments].commitments.remoteCommitIndex == rCommitIndex + 1)
+        assert(r.stateData.asInstanceOf[ChannelDataWithCommitments].commitments.remoteCommitIndex == sCommitIndex + 1)
       }
     } else {
       eventually {
         assert(s.stateData.asInstanceOf[ChannelDataWithCommitments].commitments.localCommitIndex == sCommitIndex + 1)
-        assert(s.stateData.asInstanceOf[ChannelDataWithCommitments].commitments.remoteCommitIndex == sCommitIndex + 1)
+        assert(s.stateData.asInstanceOf[ChannelDataWithCommitments].commitments.remoteCommitIndex == rCommitIndex + 1)
         assert(r.stateData.asInstanceOf[ChannelDataWithCommitments].commitments.localCommitIndex == rCommitIndex + 1)
-        assert(r.stateData.asInstanceOf[ChannelDataWithCommitments].commitments.remoteCommitIndex == rCommitIndex + 1)
+        assert(r.stateData.asInstanceOf[ChannelDataWithCommitments].commitments.remoteCommitIndex == sCommitIndex + 1)
       }
     }
   }
