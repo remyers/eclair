@@ -1344,10 +1344,11 @@ object Helpers {
         htlcsInRemoteCommit.collect(incoming) -- localCommit.spec.htlcs.collect(outgoing)
       } else if (d.revokedCommitPublished.map(_.commitTx.txid).contains(tx.txid)) {
         // a revoked commitment got confirmed: we will claim its outputs, but we also need to fail htlcs that are pending in the latest commitment:
-        //  - outgoing htlcs that are in the local commitment but not in remote/nextRemote have already been fulfilled/failed so we don't care about them
+        //  - outgoing htlcs that are in the local commitment but not in remote/nextRemote may have already been fulfilled/failed,
+        //    but could have been added after the revoked commitment
         //  - outgoing htlcs that are in the remote/nextRemote commitment may not really be overridden, but since we are going to claim their output as a
         //    punishment we will never get the preimage and may as well consider them failed in the context of relaying htlcs
-        nextRemoteCommit_opt.getOrElse(remoteCommit).spec.htlcs.collect(incoming)
+        nextRemoteCommit_opt.getOrElse(remoteCommit).spec.htlcs.collect(incoming) ++ localCommit.spec.htlcs.collect(outgoing)
       } else if (remoteCommit.txid == tx.txid) {
         // their commit got confirmed
         nextRemoteCommit_opt match {

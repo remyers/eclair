@@ -1631,7 +1631,14 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
             handleRemoteSpentNext(tx, d1)
           } else {
             // counterparty may attempt to spend a revoked commit tx at any time
-            handleRemoteSpentOther(tx, d1)
+            // to ensure we fail local htlcs overridden by a revoked commit the htlcs of the latest local commit must be set in the revoked commit
+            val localCommitSpecWithLatestHtlcs = commitment.localCommit.spec.copy(htlcs = d.commitments.latest.localCommit.spec.htlcs)
+            val commitments2 = d.commitments.copy(
+              active = commitment.copy(localCommit = commitment.localCommit.copy(spec = localCommitSpecWithLatestHtlcs)) +: Nil,
+              inactive = Nil
+            )
+            val d2 = d.copy(commitments = commitments2)
+            handleRemoteSpentOther(tx, d2)
           }
         case None =>
           log.warning(s"ignoring unrecognized alternative commit tx=${tx.txid}")

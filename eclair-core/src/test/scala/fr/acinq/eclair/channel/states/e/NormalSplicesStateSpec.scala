@@ -1830,6 +1830,13 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     alice2relayer.expectMsgType[Relayer.RelayForward]
     fulfillHtlc(add.id, preimage, alice, bob, alice2bob, bob2alice)
     crossSign(alice, bob, alice2bob, bob2alice)
+    bob2relayer.expectMsgType[RES_ADD_SETTLED[Origin, HtlcResult.OnChainFail]]
+
+    // alice adds an unresolved htlc that is committed after splice 2
+    val aliceToBob = addHtlc(9_000_000 msat, alice, bob, alice2bob, bob2alice)
+    crossSign(alice, bob, alice2bob, bob2alice)
+    bob2relayer.expectMsgType[Relayer.RelayForward]
+    val htlcs1 = htlcs.copy(aliceToBob = htlcs.aliceToBob ++ Seq(aliceToBob))
 
     // funding tx1 confirms
     alice ! WatchFundingConfirmedTriggered(BlockHeight(400000), 42, fundingTx1)
@@ -1845,13 +1852,13 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     val aliceCommitTx2 = assertPublished(alice2blockchain, "commit-tx")
     assertPublished(alice2blockchain, "local-anchor")
     val claimMainDelayed2 = assertPublished(alice2blockchain, "local-main-delayed")
-    htlcs.aliceToBob.map(_ => assertPublished(alice2blockchain, "htlc-timeout"))
+    htlcs1.aliceToBob.map(_ => assertPublished(alice2blockchain, "htlc-timeout"))
 
     alice2blockchain.expectWatchTxConfirmed(aliceCommitTx2.txid)
     alice2blockchain.expectWatchTxConfirmed(claimMainDelayed2.txid)
     alice2blockchain.expectMsgType[WatchOutputSpent] // local-anchor
-    htlcs.aliceToBob.foreach(_ => assert(alice2blockchain.expectMsgType[WatchOutputSpent].txId == aliceCommitTx2.txid))
-    htlcs.bobToAlice.foreach(_ => assert(alice2blockchain.expectMsgType[WatchOutputSpent].txId == aliceCommitTx2.txid))
+    htlcs1.aliceToBob.foreach(_ => assert(alice2blockchain.expectMsgType[WatchOutputSpent].txId == aliceCommitTx2.txid))
+    htlcs1.bobToAlice.foreach(_ => assert(alice2blockchain.expectMsgType[WatchOutputSpent].txId == aliceCommitTx2.txid))
     alice2blockchain.expectNoMessage(100 millis)
 
     // bob's revoked tx wins
@@ -1859,7 +1866,7 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     // alice reacts by punishing bob
     val aliceClaimMain = assertPublished(alice2blockchain, "remote-main-delayed")
     val aliceMainPenalty = assertPublished(alice2blockchain, "main-penalty")
-    val aliceHtlcsPenalty = htlcs.aliceToBob.map(_ => assertPublished(alice2blockchain, "htlc-penalty")) ++ htlcs.bobToAlice.map(_ => assertPublished(alice2blockchain, "htlc-penalty"))
+    val aliceHtlcsPenalty = htlcs.aliceToBob.map(_ => assertPublished(alice2blockchain, "htlc-penalty")) ++ htlcs1.bobToAlice.map(_ => assertPublished(alice2blockchain, "htlc-penalty"))
     alice2blockchain.expectWatchTxConfirmed(bobRevokedCommitTx.txid)
     alice2blockchain.expectWatchTxConfirmed(aliceClaimMain.txid)
     assert(alice2blockchain.expectMsgType[WatchOutputSpent].txId == bobRevokedCommitTx.txid) // main-penalty
@@ -1873,11 +1880,13 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     alice2blockchain.expectWatchTxConfirmed(aliceMainPenalty.txid)
     alice ! WatchTxConfirmedTriggered(BlockHeight(400000), 42, aliceMainPenalty)
     aliceHtlcsPenalty.foreach { tx => alice ! WatchTxConfirmedTriggered(BlockHeight(400000), 42, tx) }
-    val settledOutgoingHtlcs = htlcs.aliceToBob.map(_ => alice2relayer.expectMsgType[RES_ADD_SETTLED[Origin, HtlcResult.OnChainFail]].htlc).toSet
-    assert(settledOutgoingHtlcs == htlcs.aliceToBob.map(_._2).toSet)
+    val settledOutgoingHtlcs = htlcs1.aliceToBob.map(_ => alice2relayer.expectMsgType[RES_ADD_SETTLED[Origin, HtlcResult.OnChainFail]].htlc).toSet
+    assert(settledOutgoingHtlcs == htlcs1.aliceToBob.map(_._2).toSet)
 
-    // alice's final commitment includes the initial htlcs, but not bob's payment
-    checkPostSpliceState(f, spliceOutFee = 0 sat)
+    // alice's penalty txs claim the entire channel capacity, less approximate fees
+    val aliceClaims = aliceClaimMain.txOut ++ aliceMainPenalty.txOut ++ aliceHtlcsPenalty.flatMap(_.txOut)
+    val fees: Satoshi = 5490.sat * aliceClaims.size
+    assert(bobCommit1.capacity - aliceClaims.map(_.amount).sum - fees < 5_000.sat)
 
     // done
     awaitCond(alice.stateName == CLOSED)
