@@ -452,8 +452,9 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
       }
 
     case Event(add: UpdateAddHtlc, d: DATA_NORMAL) =>
+      val stfu = Stfu(d.channelId, initiator = true)
       d.commitments.receiveAdd(add, nodeParams.currentFeerates, nodeParams.onChainFeeConf) match {
-        case Right(commitments1) => stay() using d.copy(commitments = commitments1)
+        case Right(commitments1) => stay() using d.copy(commitments = commitments1) sending stfu
         case Left(cause) => handleLocalError(cause, d, Some(add))
       }
 
@@ -627,11 +628,11 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
                       (d.copy(commitments = commitments1, spliceStatus = SpliceStatus.InitiatorQuiescent(cmd)), Seq(revocation, stfu))
                     case _: SpliceStatus.ReceivedStfu if commitments1.localIsQuiescent =>
                       // should be three pending but commited updates to the channel
-                      val ids = commitments1.active.head.localCommit.spec.htlcs.collect({ case htlc => htlc.add.id }).toSeq
                       val stfu = Stfu(d.channelId, initiator = false)
+                      /*
+                      val ids = commitments1.active.head.localCommit.spec.htlcs.collect({ case htlc => htlc.add.id }).toSeq
                       // UpdateFee
                       val Right((commitments2, fee)) = commitments1.sendFee(CMD_UPDATE_FEE(FeeratePerKw(1000 sat)), nodeParams.onChainFeeConf)
-                      /*
                       // UpdateFailHtlc
                       val Right((commitments3, fail)) = commitments2.sendFail(CMD_FAIL_HTLC(ids.head, Right(TemporaryNodeFailure())), nodeParams.privateKey)
                       // UpdateFailMalformedHtlc
@@ -643,7 +644,7 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
                       val cmdAdd = CMD_ADD_HTLC(ActorRef.noSender, 6666 msat, paymentHash, expiry, emptyOnionPacket, None, Origin.LocalHot(self, UUID.randomUUID()))
                       val Right((commitments5, add)) = commitments4.sendAdd(cmdAdd, nodeParams.currentBlockHeight, nodeParams.channelConf, nodeParams.currentFeerates, nodeParams.onChainFeeConf)
                       */
-                      (d.copy(commitments = commitments2, spliceStatus = SpliceStatus.NonInitiatorQuiescent), Seq(revocation, stfu, fee))
+                      (d.copy(commitments = commitments1, spliceStatus = SpliceStatus.NonInitiatorQuiescent), Seq(revocation, stfu))
                     case _ =>
                       (d.copy(commitments = commitments1), Seq(revocation))
                   }
