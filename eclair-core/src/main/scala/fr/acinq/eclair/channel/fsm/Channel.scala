@@ -452,15 +452,12 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
       }
 
     case Event(add: UpdateAddHtlc, d: DATA_NORMAL) =>
-      val stfu = Stfu(d.channelId, initiator = true)
       d.commitments.receiveAdd(add, nodeParams.currentFeerates, nodeParams.onChainFeeConf) match {
-        case Right(commitments1) => stay() using d.copy(commitments = commitments1) sending stfu
+        case Right(commitments1) => stay() using d.copy(commitments = commitments1)
         case Left(cause) => handleLocalError(cause, d, Some(add))
       }
 
     case Event(c: CMD_FULFILL_HTLC, d: DATA_NORMAL) =>
-      stay()
-      /*
       d.commitments.sendFulfill(c) match {
         case Right((commitments1, fulfill)) =>
           if (c.commit) self ! CMD_SIGN()
@@ -470,7 +467,6 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
           // we acknowledge the command right away in case of failure
           handleCommandError(cause, c).acking(d.channelId, c)
       }
-      */
 
     case Event(fulfill: UpdateFulfillHtlc, d: DATA_NORMAL) =>
       d.commitments.receiveFulfill(fulfill) match {
@@ -627,23 +623,7 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
                       val stfu = Stfu(d.channelId, initiator = true)
                       (d.copy(commitments = commitments1, spliceStatus = SpliceStatus.InitiatorQuiescent(cmd)), Seq(revocation, stfu))
                     case _: SpliceStatus.ReceivedStfu if commitments1.localIsQuiescent =>
-                      // should be three pending but commited updates to the channel
                       val stfu = Stfu(d.channelId, initiator = false)
-                      /*
-                      val ids = commitments1.active.head.localCommit.spec.htlcs.collect({ case htlc => htlc.add.id }).toSeq
-                      // UpdateFee
-                      val Right((commitments2, fee)) = commitments1.sendFee(CMD_UPDATE_FEE(FeeratePerKw(1000 sat)), nodeParams.onChainFeeConf)
-                      // UpdateFailHtlc
-                      val Right((commitments3, fail)) = commitments2.sendFail(CMD_FAIL_HTLC(ids.head, Right(TemporaryNodeFailure())), nodeParams.privateKey)
-                      // UpdateFailMalformedHtlc
-                      val Right((commitments4, malformed)) = commitments3.sendFailMalformed(CMD_FAIL_MALFORMED_HTLC(ids(1), ByteVector32.Zeroes, FailureMessageCodecs.BADONION))
-                      // UpdateAddHtlc
-                      val expiry = CltvExpiryDelta(144).toCltvExpiry(nodeParams.currentBlockHeight)
-                      val emptyOnionPacket = OnionRoutingPacket(0, ByteVector.fill(33)(0), ByteVector.fill(1300)(0), ByteVector32.Zeroes)
-                      val paymentHash = Crypto.sha256(ByteVector32.Zeroes)
-                      val cmdAdd = CMD_ADD_HTLC(ActorRef.noSender, 6666 msat, paymentHash, expiry, emptyOnionPacket, None, Origin.LocalHot(self, UUID.randomUUID()))
-                      val Right((commitments5, add)) = commitments4.sendAdd(cmdAdd, nodeParams.currentBlockHeight, nodeParams.channelConf, nodeParams.currentFeerates, nodeParams.onChainFeeConf)
-                      */
                       (d.copy(commitments = commitments1, spliceStatus = SpliceStatus.NonInitiatorQuiescent), Seq(revocation, stfu))
                     case _ =>
                       (d.copy(commitments = commitments1), Seq(revocation))
@@ -919,7 +899,6 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
             case SpliceStatus.NoSplice =>
               startSingleTimer(QuiescenceTimeout.toString, QuiescenceTimeout(peer), nodeParams.channelConf.quiescenceTimeout)
               if (d.commitments.localIsQuiescent) {
-                /*
                 // UpdateAddHtlc
                 val amount = 4444 msat
                 val paymentHash = Crypto.sha256(ByteVector32.Zeroes)
@@ -929,14 +908,8 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
                 val recipient = SpontaneousRecipient(remoteNodeId, amount, CltvExpiryDelta(144).toCltvExpiry(nodeParams.currentBlockHeight), ByteVector32.Zeroes)
                 val Right(payment) = buildOutgoingPayment(ActorRef.noSender, nodeParams.privateKey, Upstream.Local(UUID.randomUUID()), paymentHash, route, recipient)
                 val Right((commitments1, add)) = d.commitments.sendAdd(payment.cmd, nodeParams.currentBlockHeight, nodeParams.channelConf, nodeParams.currentFeerates, nodeParams.onChainFeeConf)
-                // UpdateFee
-                val fee = UpdateFee(d.channelId, FeeratePerKw(1000 sat))
-                val changes1 = commitments1.changes.copy(localChanges = commitments1.changes.localChanges.copy(proposed = commitments1.changes.localChanges.proposed.filterNot(_.isInstanceOf[UpdateFee]) :+ fee))
-                val commitments2 = commitments1.copy(changes = changes1)
-                // self ! CMD_SIGN()
-                */
-                //stay() using d.copy(spliceStatus = SpliceStatus.NonInitiatorQuiescent) sending Stfu(d.channelId, initiator = false)                 */
-                stay() using d.copy(spliceStatus = SpliceStatus.ReceivedStfu(msg), commitments = d.commitments) // sending Seq(add, fee)
+                //stay() using d.copy(spliceStatus = SpliceStatus.NonInitiatorQuiescent) sending Stfu(d.channelId, initiator = false)
+                stay() using d.copy(spliceStatus = SpliceStatus.ReceivedStfu(msg), commitments = commitments1) sending Seq(Stfu(d.channelId, initiator = false),add)
               } else {
                 stay() using d.copy(spliceStatus = SpliceStatus.ReceivedStfu(msg))
               }
@@ -1261,8 +1234,6 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
 
   when(SHUTDOWN)(handleExceptions {
     case Event(c: CMD_FULFILL_HTLC, d: DATA_SHUTDOWN) =>
-      stay()
-      /*
       d.commitments.sendFulfill(c) match {
         case Right((commitments1, fulfill)) =>
           if (c.commit) self ! CMD_SIGN()
@@ -1271,7 +1242,6 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
           // we acknowledge the command right away in case of failure
           handleCommandError(cause, c).acking(d.channelId, c)
       }
-      */
 
     case Event(fulfill: UpdateFulfillHtlc, d: DATA_SHUTDOWN) =>
       d.commitments.receiveFulfill(fulfill) match {
@@ -1560,8 +1530,6 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
 
   when(CLOSING)(handleExceptions {
     case Event(c: HtlcSettlementCommand, d: DATA_CLOSING) =>
-      stay()
-      /*
       (c match {
         case c: CMD_FULFILL_HTLC => d.commitments.sendFulfill(c)
         case c: CMD_FAIL_HTLC => d.commitments.sendFail(c, nodeParams.privateKey)
@@ -1583,7 +1551,6 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
           handleCommandSuccess(c, d.copy(commitments = commitments1, localCommitPublished = localCommitPublished1, remoteCommitPublished = remoteCommitPublished1, nextRemoteCommitPublished = nextRemoteCommitPublished1)) storing() calling republish()
         case Left(cause) => handleCommandError(cause, c)
       }
-      */
 
     case Event(getTxResponse: GetTxWithMetaResponse, d: DATA_CLOSING) if getTxResponse.txid == d.commitments.latest.fundingTxId =>
       // NB: waitingSinceBlock contains the block at which closing was initiated, not the block at which funding was initiated.
