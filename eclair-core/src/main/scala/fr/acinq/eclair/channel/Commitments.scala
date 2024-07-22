@@ -655,7 +655,7 @@ case class Commitment(fundingTxIndex: Long,
     Metrics.recordHtlcsInFlight(spec, remoteCommit.spec)
 
     val tlvs = Set(
-      if (batchSize > 1) Some(CommitSigTlv.BatchTlv(batchSize)) else None
+      if (batchSize > 1) Some(CommitSigTlv.BatchTlv(batchSize, fundingTxId)) else None
     ).flatten[CommitSigTlv]
     val commitSig = params.commitmentFormat match {
       case _: SegwitV0CommitmentFormat =>
@@ -1036,7 +1036,10 @@ case class Commitments(params: ChannelParams,
     }
     val commitKeys = LocalCommitmentKeys(params, channelKeys, localCommitIndex + 1)
     // Signatures are sent in order (most recent first), calling `zip` will drop trailing sigs that are for deactivated/pruned commitments.
-    val active1 = active.zip(commits).map { case (commitment, commit) =>
+    val active1 = active.zipWithIndex.map { case (commitment, idx) =>
+      // If the funding_txid isn't provided, we assume that signatures are sent in order (most recent first).
+      // This matches the behavior of peers who only support the experimental version of splicing.
+      val commit = commits.find(_.fundingTxId_opt.contains(commitment.fundingTxId)).getOrElse(commits(idx))
       commitment.receiveCommit(params, channelKeys, commitKeys, changes, commit) match {
         case Left(f) => return Left(f)
         case Right(commitment1) => commitment1

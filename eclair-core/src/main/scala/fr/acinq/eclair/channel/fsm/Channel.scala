@@ -880,7 +880,7 @@ class Channel(val nodeParams: NodeParams, val channelKeys: ChannelKeys, val wall
       }
 
     case Event(cmd: CMD_SPLICE, d: DATA_NORMAL) =>
-      if (!d.commitments.params.remoteParams.initFeatures.hasFeature(Features.SplicePrototype)) {
+      if (!d.commitments.params.remoteParams.initFeatures.hasFeature(Features.Splicing)) {
         log.warning("cannot initiate splice, peer doesn't support splicing")
         cmd.replyTo ! RES_FAILURE(cmd, CommandUnavailableInThisState(d.channelId, "splice", NORMAL))
         stay()
@@ -2317,7 +2317,7 @@ class Channel(val nodeParams: NodeParams, val channelKeys: ChannelKeys, val wall
         }
         case _ => Set.empty
       }
-      val lastFundingLockedTlvs: Set[ChannelReestablishTlv] = if (d.commitments.params.remoteParams.initFeatures.hasFeature(Features.SplicePrototype)) {
+      val lastFundingLockedTlvs: Set[ChannelReestablishTlv] = if (d.commitments.params.remoteParams.initFeatures.hasFeature(Features.Splicing)) {
         d.commitments.lastLocalLocked_opt.map(c => ChannelReestablishTlv.MyCurrentFundingLockedTlv(c.fundingTxId)).toSet ++
           d.commitments.lastRemoteLocked_opt.map(c => ChannelReestablishTlv.YourLastFundingLockedTlv(c.fundingTxId)).toSet
       } else Set.empty
@@ -2446,7 +2446,7 @@ class Channel(val nodeParams: NodeParams, val channelKeys: ChannelKeys, val wall
             // We only send channel_ready for initial funding transactions.
             case Some(c) if c.fundingTxIndex != 0 => ()
             case Some(c) =>
-              val remoteSpliceSupport = d.commitments.params.remoteParams.initFeatures.hasFeature(Features.SplicePrototype)
+              val remoteSpliceSupport = d.commitments.params.remoteParams.initFeatures.hasFeature(Features.Splicing)
               // If our peer has not received our channel_ready, we retransmit it.
               val notReceivedByRemote = remoteSpliceSupport && channelReestablish.yourLastFundingLocked_opt.isEmpty
               // If next_local_commitment_number is 1 in both the channel_reestablish it sent and received, then the node
@@ -3049,7 +3049,7 @@ class Channel(val nodeParams: NodeParams, val channelKeys: ChannelKeys, val wall
   /** For splices we will send one commit_sig per active commitments. */
   private def aggregateSigs(commit: CommitSig): Option[Seq[CommitSig]] = {
     sigStash = sigStash :+ commit
-    log.debug("received sig for batch of size={}", commit.batchSize)
+    log.debug("received sig for batch of size={} for fundingTxId={}", commit.batchSize, commit.fundingTxId_opt)
     if (sigStash.size == commit.batchSize) {
       val sigs = sigStash
       sigStash = Nil
