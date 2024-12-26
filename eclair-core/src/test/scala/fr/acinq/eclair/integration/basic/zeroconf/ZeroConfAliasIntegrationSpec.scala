@@ -5,7 +5,7 @@ import com.softwaremill.quicklens._
 import fr.acinq.bitcoin.scalacompat.{ByteVector32, SatoshiLong}
 import fr.acinq.eclair.FeatureSupport.{Mandatory, Optional}
 import fr.acinq.eclair.Features.{ScidAlias, ZeroConf}
-import fr.acinq.eclair.channel.{DATA_NORMAL, RealScidStatus}
+import fr.acinq.eclair.channel.DATA_NORMAL
 import fr.acinq.eclair.crypto.Sphinx
 import fr.acinq.eclair.integration.basic.fixtures.composite.ThreeNodesFixture
 import fr.acinq.eclair.payment.Bolt11Invoice.ExtraHop
@@ -50,12 +50,12 @@ class ZeroConfAliasIntegrationSpec extends FixtureSpec with IntegrationPatience 
     fixture.cleanup()
   }
 
-  private def createChannels(f: FixtureParam)(deepConfirm: Boolean): (ByteVector32, ByteVector32) = {
+  private def createChannels(f: FixtureParam, confirm: Boolean): (ByteVector32, ByteVector32) = {
     import f._
 
-    alice.watcher.setAutoPilot(watcherAutopilot(knownFundingTxs(alice, bob, carol), deepConfirm = deepConfirm))
-    bob.watcher.setAutoPilot(watcherAutopilot(knownFundingTxs(alice, bob, carol), deepConfirm = deepConfirm))
-    carol.watcher.setAutoPilot(watcherAutopilot(knownFundingTxs(alice, bob, carol), deepConfirm = deepConfirm))
+    alice.watcher.setAutoPilot(watcherAutopilot(knownFundingTxs(alice, bob, carol), confirm = confirm))
+    bob.watcher.setAutoPilot(watcherAutopilot(knownFundingTxs(alice, bob, carol), confirm = confirm))
+    carol.watcher.setAutoPilot(watcherAutopilot(knownFundingTxs(alice, bob, carol), confirm = confirm))
 
     connect(alice, bob)
     connect(bob, carol)
@@ -109,7 +109,7 @@ class ZeroConfAliasIntegrationSpec extends FixtureSpec with IntegrationPatience 
   }
 
   private def internalTest(f: FixtureParam,
-                           deepConfirm: Boolean,
+                           confirm: Boolean,
                            bcPublic: Boolean,
                            bcZeroConf: Boolean,
                            bcScidAlias: Boolean,
@@ -118,23 +118,21 @@ class ZeroConfAliasIntegrationSpec extends FixtureSpec with IntegrationPatience 
                            paymentWithRealScidHint_opt: Option[Either[Either[Throwable, FailureMessage], Ok.type]]): Unit = {
     import f._
 
-    val (_, channelId_bc) = createChannels(f)(deepConfirm = deepConfirm)
+    val (_, channelId_bc) = createChannels(f, confirm)
 
     eventually {
       assert(getChannelData(bob, channelId_bc).asInstanceOf[DATA_NORMAL].commitments.params.channelFeatures.features.contains(ZeroConf) == bcZeroConf)
       assert(getChannelData(bob, channelId_bc).asInstanceOf[DATA_NORMAL].commitments.params.channelFeatures.features.contains(ScidAlias) == bcScidAlias)
       assert(getChannelData(bob, channelId_bc).asInstanceOf[DATA_NORMAL].commitments.params.channelFlags.announceChannel == bcPublic)
-      if (deepConfirm) {
-        assert(getChannelData(bob, channelId_bc).asInstanceOf[DATA_NORMAL].shortIds.real.isInstanceOf[RealScidStatus.Final])
-      } else if (bcZeroConf) {
-        assert(getChannelData(bob, channelId_bc).asInstanceOf[DATA_NORMAL].shortIds.real == RealScidStatus.Unknown)
+      if (confirm) {
+        assert(getChannelData(bob, channelId_bc).asInstanceOf[DATA_NORMAL].shortIds.real_opt.nonEmpty)
       } else {
-        assert(getChannelData(bob, channelId_bc).asInstanceOf[DATA_NORMAL].shortIds.real.isInstanceOf[RealScidStatus.Temporary])
+        assert(getChannelData(bob, channelId_bc).asInstanceOf[DATA_NORMAL].shortIds.real_opt.isEmpty)
       }
     }
 
     eventually {
-      if (bcPublic && deepConfirm) {
+      if (bcPublic && confirm) {
         // if channel bob-carol is public, we wait for alice to learn about it
         val data = getRouterData(alice)
         assert(data.channels.size == 2)
@@ -154,14 +152,14 @@ class ZeroConfAliasIntegrationSpec extends FixtureSpec with IntegrationPatience 
 
     paymentWithRealScidHint_opt.foreach { paymentWithRealScidHint =>
       eventually {
-        sendPaymentAliceToCarol(f, paymentWithRealScidHint, useHint = true, overrideHintScid_opt = Some(getChannelData(bob, channelId_bc).asInstanceOf[DATA_NORMAL].shortIds.real.toOption.value))
+        sendPaymentAliceToCarol(f, paymentWithRealScidHint, useHint = true, overrideHintScid_opt = Some(getChannelData(bob, channelId_bc).asInstanceOf[DATA_NORMAL].shortIds.real_opt.value))
       }
     }
 
     eventually {
-      if (deepConfirm) {
+      if (confirm) {
         val scidsBob = getChannelData(bob, channelId_bc).asInstanceOf[DATA_NORMAL].shortIds
-        val scid_bc = if (bcPublic) scidsBob.real.toOption.get else scidsBob.localAlias
+        val scid_bc = if (bcPublic) scidsBob.real_opt.get else scidsBob.localAlias
         createSelfRouteCarol(f, scid_bc)
       }
     }
@@ -169,7 +167,7 @@ class ZeroConfAliasIntegrationSpec extends FixtureSpec with IntegrationPatience 
 
   test("a->b->c (b-c private)") { f =>
     internalTest(f,
-      deepConfirm = true,
+      confirm = true,
       bcPublic = false,
       bcZeroConf = false,
       bcScidAlias = false,
@@ -181,7 +179,7 @@ class ZeroConfAliasIntegrationSpec extends FixtureSpec with IntegrationPatience 
 
   test("a->b->c (b-c scid-alias private)", Tag(ScidAliasBobCarol)) { f =>
     internalTest(f,
-      deepConfirm = true,
+      confirm = true,
       bcPublic = false,
       bcZeroConf = false,
       bcScidAlias = true,
@@ -193,7 +191,7 @@ class ZeroConfAliasIntegrationSpec extends FixtureSpec with IntegrationPatience 
 
   test("a->b->c (b-c zero-conf unconfirmed private)", Tag(ZeroConfBobCarol)) { f =>
     internalTest(f,
-      deepConfirm = false,
+      confirm = false,
       bcPublic = false,
       bcZeroConf = true,
       bcScidAlias = false,
@@ -205,7 +203,7 @@ class ZeroConfAliasIntegrationSpec extends FixtureSpec with IntegrationPatience 
 
   test("a->b->c (b-c zero-conf deeply confirmed private)", Tag(ZeroConfBobCarol)) { f =>
     internalTest(f,
-      deepConfirm = true,
+      confirm = true,
       bcPublic = false,
       bcZeroConf = true,
       bcScidAlias = false,
@@ -222,7 +220,7 @@ class ZeroConfAliasIntegrationSpec extends FixtureSpec with IntegrationPatience 
 
   test("a->b->c (b-c zero-conf scid-alias deeply confirmed private)", Tag(ZeroConfBobCarol), Tag(ScidAliasBobCarol)) { f =>
     internalTest(f,
-      deepConfirm = true,
+      confirm = true,
       bcPublic = false,
       bcZeroConf = true,
       bcScidAlias = true,
@@ -234,7 +232,7 @@ class ZeroConfAliasIntegrationSpec extends FixtureSpec with IntegrationPatience 
 
   test("a->b->c (b-c zero-conf unconfirmed public)", Tag(ZeroConfBobCarol), Tag(PublicBobCarol)) { f =>
     internalTest(f,
-      deepConfirm = false,
+      confirm = false,
       bcPublic = true,
       bcZeroConf = true,
       bcScidAlias = false,
@@ -246,7 +244,7 @@ class ZeroConfAliasIntegrationSpec extends FixtureSpec with IntegrationPatience 
 
   test("a->b->c (b-c zero-conf deeply confirmed public)", Tag(ZeroConfBobCarol), Tag(PublicBobCarol)) { f =>
     internalTest(f,
-      deepConfirm = true,
+      confirm = true,
       bcPublic = true,
       bcZeroConf = true,
       bcScidAlias = false,
@@ -259,12 +257,12 @@ class ZeroConfAliasIntegrationSpec extends FixtureSpec with IntegrationPatience 
   test("temporary channel failures don't leak the real scid", Tag(ScidAliasBobCarol), Tag(ZeroConfBobCarol)) { f =>
     import f._
 
-    val (_, channelId_bc) = createChannels(f)(deepConfirm = false)
+    val (_, channelId_bc) = createChannels(f, confirm = false)
 
     eventually {
       assert(getChannelData(bob, channelId_bc).asInstanceOf[DATA_NORMAL].commitments.params.channelFeatures.features.contains(ZeroConf))
       assert(getChannelData(bob, channelId_bc).asInstanceOf[DATA_NORMAL].commitments.params.channelFeatures.features.contains(ScidAlias))
-      assert(getChannelData(bob, channelId_bc).asInstanceOf[DATA_NORMAL].shortIds.real == RealScidStatus.Unknown)
+      assert(getChannelData(bob, channelId_bc).asInstanceOf[DATA_NORMAL].shortIds.real_opt.isEmpty)
       assert(getRouterData(bob).privateChannels.values.exists(_.nodeId2 == carol.nodeParams.nodeId))
     }
 

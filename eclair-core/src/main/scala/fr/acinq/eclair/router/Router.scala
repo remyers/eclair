@@ -451,7 +451,7 @@ object Router {
       // we want the incoming channel_update
       val remoteUpdate_opt = if (localNodeId == nodeId1) update_2_opt else update_1_opt
       // for incoming payments we preferably use the *remote alias*, otherwise the real scid if we have it
-      val scid_opt = shortIds.remoteAlias_opt.orElse(shortIds.real.toOption)
+      val scid_opt = shortIds.remoteAlias_opt.orElse(shortIds.real_opt)
       // we override the remote update's scid, because it contains either the real scid or our local alias
       scid_opt.flatMap { scid =>
         remoteUpdate_opt.map { remoteUpdate =>
