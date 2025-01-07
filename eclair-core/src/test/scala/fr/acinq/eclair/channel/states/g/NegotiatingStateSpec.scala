@@ -89,7 +89,7 @@ class NegotiatingStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLike 
   def buildFeerates(feerate: FeeratePerKw, minFeerate: FeeratePerKw = FeeratePerKw(250 sat)): FeeratesPerKw =
     FeeratesPerKw.single(feerate).copy(minimum = minFeerate, slow = minFeerate)
 
-  test("emit disabled channel update", Tag(ChannelStateTestsTags.ChannelsPublic)) { f =>
+  test("emit disabled channel update", Tag(ChannelStateTestsTags.ChannelsPublic), Tag(ChannelStateTestsTags.DoNotInterceptChannelUpdates)) { f =>
     import f._
 
     val aliceListener = TestProbe()

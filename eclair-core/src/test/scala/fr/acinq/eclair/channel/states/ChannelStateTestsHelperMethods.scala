@@ -93,6 +93,8 @@ object ChannelStateTestsTags {
   val DelayRbfAttempts = "delay_rbf_attempts"
   /** If set, channels will adapt their max HTLC amount to the available balance */
   val AdaptMaxHtlcAmount = "adapt-max-htlc-amount"
+  /** If set, public channels will not intercept initial ChannelUpdate messages. */
+  val DoNotInterceptChannelUpdates = "do_not_intercept_channel_updates"
 }
 
 trait ChannelStateTestsBase extends Assertions with Eventually {
@@ -355,7 +357,7 @@ trait ChannelStateTestsBase extends Assertions with Eventually {
       fundingTx
     }
 
-    if (interceptChannelUpdates && !tags.contains(ChannelStateTestsTags.ChannelsPublic)) {
+    if (interceptChannelUpdates && !tags.contains(ChannelStateTestsTags.DoNotInterceptChannelUpdates)) {
       // we don't forward the channel updates, in reality they would be processed by the router
       alice2bob.expectMsgType[ChannelUpdate]
       bob2alice.expectMsgType[ChannelUpdate]

@@ -911,7 +911,7 @@ class NormalStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLike with 
     assert(alice.stateData.asInstanceOf[DATA_NORMAL].commitments.remoteNextCommitInfo == Left(waitForRevocation))
   }
 
-  test("recv CMD_SIGN (going above balance threshold)", Tag(ChannelStateTestsTags.NoPushAmount), Tag(ChannelStateTestsTags.ChannelsPublic), Tag(ChannelStateTestsTags.AdaptMaxHtlcAmount)) { f =>
+  test("recv CMD_SIGN (going above balance threshold)", Tag(ChannelStateTestsTags.NoPushAmount), Tag(ChannelStateTestsTags.ChannelsPublic), Tag(ChannelStateTestsTags.AdaptMaxHtlcAmount), Tag(ChannelStateTestsTags.DoNotInterceptChannelUpdates)) { f =>
     import f._
 
     val aliceListener = TestProbe()
@@ -3594,7 +3594,7 @@ class NormalStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLike with 
     assert(addSettled.htlc == htlc1)
   }
 
-  test("recv WatchFundingConfirmedTriggered (public channel, zero-conf)", Tag(ChannelStateTestsTags.ChannelsPublic), Tag(ChannelStateTestsTags.AnchorOutputsZeroFeeHtlcTxs), Tag(ChannelStateTestsTags.ZeroConf)) { f =>
+  test("recv WatchFundingConfirmedTriggered (public channel, zero-conf)", Tag(ChannelStateTestsTags.ChannelsPublic), Tag(ChannelStateTestsTags.AnchorOutputsZeroFeeHtlcTxs), Tag(ChannelStateTestsTags.ZeroConf), Tag(ChannelStateTestsTags.DoNotInterceptChannelUpdates)) { f =>
     import f._
     // For zero-conf channels we don't have a real short_channel_id when going to the NORMAL state.
     val aliceState = alice.stateData.asInstanceOf[DATA_NORMAL]
@@ -3646,7 +3646,7 @@ class NormalStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLike with 
     listener.expectMsgType[TransactionConfirmed]
   }
 
-  test("recv AnnouncementSignatures", Tag(ChannelStateTestsTags.ChannelsPublic)) { f =>
+  test("recv AnnouncementSignatures", Tag(ChannelStateTestsTags.ChannelsPublic), Tag(ChannelStateTestsTags.DoNotInterceptChannelUpdates)) { f =>
     import f._
     val initialState = alice.stateData.asInstanceOf[DATA_NORMAL]
     val realShortChannelId = initialState.shortIds.real_opt.get
@@ -3680,7 +3680,7 @@ class NormalStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLike with 
     channelUpdateListener.expectNoMessage(100 millis)
   }
 
-  test("recv AnnouncementSignatures (invalid)", Tag(ChannelStateTestsTags.ChannelsPublic)) { f =>
+  test("recv AnnouncementSignatures (invalid)", Tag(ChannelStateTestsTags.ChannelsPublic), Tag(ChannelStateTestsTags.DoNotInterceptChannelUpdates)) { f =>
     import f._
     val channelId = alice.stateData.asInstanceOf[DATA_NORMAL].channelId
     alice2bob.expectMsgType[AnnouncementSignatures]
@@ -3696,7 +3696,7 @@ class NormalStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLike with 
     awaitCond(alice.stateName == CLOSING)
   }
 
-  test("recv BroadcastChannelUpdate", Tag(ChannelStateTestsTags.ChannelsPublic)) { f =>
+  test("recv BroadcastChannelUpdate", Tag(ChannelStateTestsTags.ChannelsPublic), Tag(ChannelStateTestsTags.DoNotInterceptChannelUpdates)) { f =>
     import f._
     val realScid = bob2alice.expectMsgType[AnnouncementSignatures].shortChannelId
     bob2alice.forward(alice)
@@ -3711,7 +3711,7 @@ class NormalStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLike with 
     assert(update1.channelUpdate.timestamp < update2.channelUpdate.timestamp)
   }
 
-  test("recv BroadcastChannelUpdate (no changes)", Tag(ChannelStateTestsTags.ChannelsPublic)) { f =>
+  test("recv BroadcastChannelUpdate (no changes)", Tag(ChannelStateTestsTags.ChannelsPublic), Tag(ChannelStateTestsTags.DoNotInterceptChannelUpdates)) { f =>
     import f._
     bob2alice.expectMsgType[AnnouncementSignatures]
     bob2alice.forward(alice)
@@ -3758,7 +3758,7 @@ class NormalStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLike with 
     awaitCond(alice.stateName == OFFLINE)
   }
 
-  test("recv INPUT_DISCONNECTED (public channel)", Tag(ChannelStateTestsTags.ChannelsPublic)) { f =>
+  test("recv INPUT_DISCONNECTED (public channel)", Tag(ChannelStateTestsTags.ChannelsPublic), Tag(ChannelStateTestsTags.DoNotInterceptChannelUpdates)) { f =>
     import f._
     bob2alice.expectMsgType[AnnouncementSignatures]
     bob2alice.forward(alice)
@@ -3771,7 +3771,7 @@ class NormalStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLike with 
     channelUpdateListener.expectNoMessage(1 second)
   }
 
-  test("recv INPUT_DISCONNECTED (public channel, with pending unsigned htlcs)", Tag(ChannelStateTestsTags.ChannelsPublic)) { f =>
+  test("recv INPUT_DISCONNECTED (public channel, with pending unsigned htlcs)", Tag(ChannelStateTestsTags.ChannelsPublic), Tag(ChannelStateTestsTags.DoNotInterceptChannelUpdates)) { f =>
     import f._
     val sender = TestProbe()
     bob2alice.expectMsgType[AnnouncementSignatures]

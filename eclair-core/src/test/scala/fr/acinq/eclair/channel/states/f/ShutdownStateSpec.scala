@@ -106,7 +106,7 @@ class ShutdownStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLike wit
     val setup = init()
     import setup._
     within(30 seconds) {
-      reachNormal(setup, Set(ChannelStateTestsTags.ChannelsPublic))
+      reachNormal(setup, Set(ChannelStateTestsTags.ChannelsPublic), interceptChannelUpdates = false)
 
       val aliceListener = TestProbe()
       systemA.eventStream.subscribe(aliceListener.ref, classOf[LocalChannelUpdate])
