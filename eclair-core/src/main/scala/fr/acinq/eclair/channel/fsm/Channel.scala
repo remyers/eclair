@@ -1379,6 +1379,17 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
     case Event(msg: SpliceLocked, d: DATA_NORMAL) =>
       d.commitments.updateRemoteFundingStatus(msg.fundingTxId, d.lastAnnouncedFundingTxId_opt) match {
         case Right((commitments1, commitment)) =>
+          // If we already have a signed channel announcement for this commitment, then we are receiving splice_locked
+          // again after a reconnection and must retransmit our splice_locked and new announcement_signatures. Nodes
+          // retransmit splice_locked after a reconnection when they have received splice_locked but NOT matching signatures
+          // before the last disconnect. If announcement_signatures have been sent since a reconnect, then do not
+          // retransmit splice_locked to avoid a loop.
+          // NB: It is important both nodes retransmit splice_locked after reconnecting to ensure new Taproot nonces
+          // are exchanged for channel announcements.
+          val spliceLocked_opt = d.lastAnnouncement_opt.collect {
+            case ann if announcementSigsSent.isEmpty && commitment.shortChannelId_opt.contains(ann.shortChannelId) =>
+              SpliceLocked(d.channelId, msg.fundingTxId)
+          }
           // If the commitment is confirmed, we were waiting to receive the remote splice_locked before sending our announcement_signatures.
           val localAnnSigs_opt = if (d.commitments.announceChannel) commitment.signAnnouncement(nodeParams, commitments1.params) else None
           localAnnSigs_opt match {
@@ -1388,15 +1399,6 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
               // If we've already received the remote announcement_signatures, we're now ready to process them.
               announcementSigsStash.get(localAnnSigs.shortChannelId).foreach(self ! _)
             case None => // The channel is private or the commitment isn't locked on our side.
-          }
-          // If we already have a signed channel announcement for this commitment, then we are receiving splice_locked
-          // again after a reconnection and must retransmit our splice_locked and new announcement_signatures. Nodes
-          // retransmit splice_locked after a reconnection when they have received splice_locked but NOT matching signatures.
-          // NB: It is important both nodes retransmit splice_locked after reconnecting to ensure new Taproot nonces
-          // are exchanged for channel announcements.
-          val spliceLocked_opt = d.lastAnnouncement_opt.collect {
-            case ann if commitment.shortChannelId_opt.contains(ann.shortChannelId) =>
-              SpliceLocked(d.channelId, msg.fundingTxId)
           }
           maybeEmitEventsPostSplice(d.aliases, d.commitments, commitments1, d.lastAnnouncement_opt)
           maybeUpdateMaxHtlcAmount(d.channelUpdate.htlcMaximumMsat, commitments1)

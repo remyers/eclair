@@ -2506,12 +2506,12 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     bob2alice.expectNoMessage(100 millis)
 
     // Alice resends `splice_locked` because she did not receive `announcement_signatures` from Bob before the disconnect.
-    alice2bob.expectMsgType[SpliceLocked]
+    val aliceSpliceLocked = alice2bob.expectMsgType[SpliceLocked]
     alice2bob.forward(bob)
     alice2bob.expectNoMessage(100 millis)
 
     // Bob receives Alice's `splice_locked` after `channel_reestablish` and must retransmit both `splice_locked` and `announcement_signatures`.
-    bob2alice.expectMsgType[SpliceLocked]
+    val bobSpliceLocked = bob2alice.expectMsgType[SpliceLocked]
     bob2alice.forward(alice)
     bob2alice.expectMsgType[AnnouncementSignatures]
     bob2alice.forward(alice)
@@ -2520,6 +2520,17 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     // Alice retransmits `announcement_signatures` to Bob after receiving `splice_locked` from Bob.
     alice2bob.expectMsgType[AnnouncementSignatures]
     alice2bob.forward(bob)
+    alice2bob.expectNoMessage(100 millis)
+    bob2alice.expectNoMessage(100 millis)
+
+    // If either node receives `splice_locked` again before reconnecting, reply with `announcement_signatures` and not
+    // `splice_locked` to avoid a loop.
+    alice2bob.forward(bob, aliceSpliceLocked)
+    bob2alice.forward(alice, bobSpliceLocked)
+    alice2bob.expectMsgType[AnnouncementSignatures]
+    alice2bob.forward(bob)
+    bob2alice.expectMsgType[AnnouncementSignatures]
+    bob2alice.forward(alice)
     alice2bob.expectNoMessage(100 millis)
     bob2alice.expectNoMessage(100 millis)
 
@@ -2563,11 +2574,11 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     reconnect(f)
 
     // Bob resends `splice_locked` because he did not receive `announcement_signatures` from Alice before the disconnect.
-    bob2alice.expectMsgType[SpliceLocked]
+    val bobSpliceLocked = bob2alice.expectMsgType[SpliceLocked]
     bob2alice.expectNoMessage(100 millis)
 
     // Alice resends `splice_locked` because she did not receive `announcement_signatures` from Bob before the disconnect.
-    alice2bob.expectMsgType[SpliceLocked]
+    val aliceSpliceLocked = alice2bob.expectMsgType[SpliceLocked]
     alice2bob.forward(bob)
     alice2bob.expectNoMessage(100 millis)
 
@@ -2578,6 +2589,17 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     alice2bob.expectNoMessage(100 millis)
 
     // Bob retransmits `announcement_signatures` to Alice after receiving `announcement_signatures` from Alice.
+    bob2alice.expectMsgType[AnnouncementSignatures]
+    bob2alice.forward(alice)
+    alice2bob.expectNoMessage(100 millis)
+    bob2alice.expectNoMessage(100 millis)
+
+    // If either node receives `splice_locked` again before reconnecting, reply with `announcement_signatures` and not
+    // `splice_locked` to avoid a loop.
+    alice2bob.forward(bob, aliceSpliceLocked)
+    bob2alice.forward(alice, bobSpliceLocked)
+    alice2bob.expectMsgType[AnnouncementSignatures]
+    alice2bob.forward(bob)
     bob2alice.expectMsgType[AnnouncementSignatures]
     bob2alice.forward(alice)
     alice2bob.expectNoMessage(100 millis)
