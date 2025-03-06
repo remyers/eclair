@@ -2306,7 +2306,7 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
         }
         case _ => Set.empty
       }
-      val lastFundingLockedTlvs: Set[ChannelReestablishTlv] = if (d.commitments.params.remoteParams.initFeatures.hasFeature(Features.SplicePrototype)) {
+      val lastFundingLockedTlvs: Set[ChannelReestablishTlv] = if (d.commitments.params.remoteParams.initFeatures.hasFeature(Features.Splicing)) {
         d.commitments.lastLocalLocked_opt.map(c => ChannelReestablishTlv.MyCurrentFundingLockedTlv(c.fundingTxId)).toSet ++
           d.commitments.lastRemoteLocked_opt.map(c => ChannelReestablishTlv.YourLastFundingLockedTlv(c.fundingTxId)).toSet
       } else Set.empty
@@ -2435,7 +2435,7 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
             // We only send channel_ready for initial funding transactions.
             case Some(c) if c.fundingTxIndex != 0 => ()
             case Some(c) =>
-              val remoteSpliceSupport = d.commitments.params.remoteParams.initFeatures.hasFeature(Features.SplicePrototype)
+              val remoteSpliceSupport = d.commitments.params.remoteParams.initFeatures.hasFeature(Features.Splicing)
               // If our peer has not received our channel_ready, we retransmit it.
               val notReceivedByRemote = remoteSpliceSupport && channelReestablish.yourLastFundingLocked_opt.isEmpty
               // If next_local_commitment_number is 1 in both the channel_reestablish it sent and received, then the node
