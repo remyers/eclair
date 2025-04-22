@@ -222,6 +222,8 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
   // we keep track of the splice_locked we sent after channel_reestablish and it's funding tx index to avoid sending it again
   private var spliceLockedSent = Map.empty[TxId, Long]
 
+  private var reconnectCount: Int = 0
+
   private def trimAnnouncementSigsStashIfNeeded(): Unit = {
     if (announcementSigsStash.size >= 10) {
       // We shouldn't store an unbounded number of announcement_signatures for scids that we don't have in our
@@ -467,7 +469,12 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
         case Right((commitments1, add)) =>
           if (c.commit) self ! CMD_SIGN()
           context.system.eventStream.publish(AvailableBalanceChanged(self, d.channelId, d.aliases, commitments1, d.lastAnnouncement_opt))
-          handleCommandSuccess(c, d.copy(commitments = commitments1)) sending add
+          if (c.amount == 15005.sat.toMilliSatoshi) {
+            log.debug("Not sending our update_add_htlc for interop test: Disconnection with both sides sending tx_signatures and channel updates")
+            handleCommandSuccess(c, d.copy(commitments = commitments1))
+          }
+          else
+            handleCommandSuccess(c, d.copy(commitments = commitments1)) sending add
         case Left(cause) => handleAddHtlcCommandError(c, cause, Some(d.channelUpdate))
       }
 
@@ -575,7 +582,17 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
               context.system.eventStream.publish(ChannelSignatureSent(self, commitments1))
               // we expect a quick response from our peer
               startSingleTimer(RevocationTimeout.toString, RevocationTimeout(commitments1.latest.remoteCommit.index, peer), nodeParams.channelConf.revocationTimeout)
-              handleCommandSuccess(c, d.copy(commitments = commitments1)).storing().sending(commit).acking(commitments1.changes.localChanges.signed)
+              if (reconnectCount == 0 && trimmedHtlcs.nonEmpty && trimmedHtlcs.head.add.amountMsat == 15005.sat.toMilliSatoshi) {
+                log.debug("Not sending our commit sigs for interop test: Disconnection with both sides sending tx_signatures and channel updates")
+                peer ! Peer.Disconnect(remoteNodeId)
+                handleCommandSuccess(c, d.copy(commitments = commitments1)).acking(commitments1.changes.localChanges.signed)
+              } else if (reconnectCount == 0 && trimmedHtlcs.nonEmpty && trimmedHtlcs.head.add.amountMsat == 15007.sat.toMilliSatoshi) {
+                log.debug("Not sending our commit sigs for interop test: Disconnection after exchanging tx_signatures and one side sends commit_sig for channel update")
+                peer ! Peer.Disconnect(remoteNodeId)
+                handleCommandSuccess(c, d.copy(commitments = commitments1)).acking(commitments1.changes.localChanges.signed)
+              }
+              else
+                handleCommandSuccess(c, d.copy(commitments = commitments1)).storing().sending(commit).acking(commitments1.changes.localChanges.signed)
             case Left(cause) => handleCommandError(cause, c)
           }
         case Left(_) =>
@@ -626,6 +643,10 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
               // splice statuses, but it would force us to handle corner cases like race condition between splice_init
               // and a non-splice commit_sig
               d.commitments.receiveCommit(sigs, keyManager) match {
+                case Right((commitments1, _)) if reconnectCount == 0 && commitments1.latest.localCommit.spec.htlcs.nonEmpty && (commitments1.latest.localCommit.spec.toLocal - 15008.sat.toMilliSatoshi).toLong % 10000 == 0=>
+                  log.debug("Ignoring commit sigs for interop test: Disconnection after exchanging tx_signatures and both sides send commit_sig for channel update")
+                  peer ! Peer.Disconnect(remoteNodeId)
+                  stay()
                 case Right((commitments1, revocation)) =>
                   log.debug("received a new sig, spec:\n{}", commitments1.latest.specs2String)
                   if (commitments1.changes.localHasChanges) {
@@ -1303,7 +1324,18 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
                 case purchase if !signingSession.fundingParams.isInitiator => peer ! LiquidityPurchaseSigned(d.channelId, signingSession.fundingTx.txId, signingSession.fundingTxIndex, d.commitments.params.remoteParams.htlcMinimum, purchase)
               }
               val d1 = d.copy(spliceStatus = SpliceStatus.SpliceWaitingForSigs(signingSession))
-              stay() using d1 storing() sending commitSig
+              cmd_opt match {
+                case Some(CMD_SPLICE(_, Some(SpliceIn(funding, _)), _, _)) if funding == 15001.sat =>
+                  log.debug("Not sending commit_sig for interop test: Disconnection with one side sending commit_sig")
+                  peer ! Peer.Disconnect(remoteNodeId)
+                  stay() using d1 storing()
+                case Some(CMD_SPLICE(_, Some(SpliceIn(funding, _)), _, _)) if funding == 15002.sat =>
+                  log.debug("Not sending commit_sig for interop test: Disconnection with both sides sending commit_sig")
+                  peer ! Peer.Disconnect(remoteNodeId)
+                  stay() using d1 storing()
+                case _ =>
+                  stay() using d1 storing() sending commitSig
+              }
             case f: InteractiveTxBuilder.Failed =>
               log.info("splice attempt failed: {}", f.cause.getMessage)
               cmd_opt.foreach(cmd => cmd.replyTo ! RES_FAILURE(cmd, f.cause))
@@ -1351,7 +1383,22 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
                   val d1 = d.copy(commitments = commitments1, spliceStatus = SpliceStatus.NoSplice)
                   log.info("publishing funding tx for channelId={} fundingTxId={}", d.channelId, signingSession1.fundingTx.sharedTx.txId)
                   Metrics.recordSplice(signingSession1.fundingTx.fundingParams, signingSession1.fundingTx.sharedTx.tx)
-                  stay() using d1 storing() sending signingSession1.localSigs calling publishFundingTx(signingSession1.fundingTx) calling endQuiescence(d1)
+                  if (reconnectCount == 0 && signingSession.fundingParams.localContribution == 15003.sat) {
+                    log.debug("Ignoring their tx_signatures for interop test: Disconnection with one side sending tx_signatures")
+                    peer ! Peer.Disconnect(remoteNodeId)
+                    stay()
+                  }
+                  else if (signingSession.fundingParams.localContribution == 15004.sat) {
+                    log.debug("Not sending our tx_signatures for interop test: Disconnection with both sides sending tx_signatures")
+                    peer ! Peer.Disconnect(remoteNodeId)
+                    stay() using d1 storing() calling publishFundingTx(signingSession1.fundingTx) calling endQuiescence(d1)
+                  } else if (reconnectCount == 0 && signingSession.fundingParams.localContribution == 15005.sat) {
+                    log.debug("Not sending our tx_signatures for interop test: Disconnection with both sides sending tx_signatures and channel updates")
+                    stay() using d1 storing() calling publishFundingTx(signingSession1.fundingTx) calling endQuiescence(d1)
+                  } else {
+                    log.info("reconnectCount={}, signingSession.fundingParams.localContribution={}",reconnectCount, signingSession.fundingParams.localContribution )
+                    stay() using d1 storing() sending signingSession1.localSigs calling publishFundingTx(signingSession1.fundingTx) calling endQuiescence(d1)
+                  }
               }
             case _ =>
               // We may receive an outdated tx_signatures if the transaction is already confirmed.
@@ -1399,9 +1446,21 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
             maybeEmitEventsPostSplice(d.aliases, d.commitments, commitments1, d.lastAnnouncement_opt)
             maybeUpdateMaxHtlcAmount(d.channelUpdate.htlcMaximumMsat, commitments1)
           }
-          stay() using d.copy(commitments = commitments1) storing() sending spliceLocked_opt.toSeq ++ localAnnSigs_opt.toSeq
+          if ((commitment.capacity - 15006.sat).toLong % 10000 == 0) {
+            log.debug("Not sending our splice_locked for interop test: Disconnection with concurrent splice_locked")
+            peer ! Peer.Disconnect(remoteNodeId)
+            stay() using d.copy(commitments = commitments1) storing()
+          } else
+            stay() using d.copy(commitments = commitments1) storing() sending spliceLocked_opt.toSeq ++ localAnnSigs_opt.toSeq
         case Left(_) => stay()
       }
+
+    case Event(msg: SpliceLocked, d: DATA_NORMAL) if (reconnectCount == 2 && (d.commitments.latest.capacity - 15006.sat).toLong % 10000 == 0) =>
+      // defer splice_locked for interop test to simulate simultaneous sent splice_locked arriving *after* we create update_add_htlc
+      log.debug("Deferring processing splice_locked from peer for interop test: Disconnection with concurrent splice_locked")
+      context.system.scheduler.scheduleOnce(1 second, self, msg)
+      reconnectCount += 1
+      stay()
 
     case Event(msg: SpliceLocked, d: DATA_NORMAL) =>
       d.commitments.updateRemoteFundingStatus(msg.fundingTxId, d.lastAnnouncedFundingTxId_opt) match {
@@ -1433,7 +1492,12 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
           }
           maybeEmitEventsPostSplice(d.aliases, d.commitments, commitments1, d.lastAnnouncement_opt)
           maybeUpdateMaxHtlcAmount(d.channelUpdate.htlcMaximumMsat, commitments1)
-          stay() using d.copy(commitments = commitments1) storing() sending spliceLocked_opt.toSeq ++ localAnnSigs_opt.toSeq
+          if (reconnectCount == 1 && (commitment.capacity - 15006.sat).toLong % 10000 == 0) {
+            log.debug("Ignoring splice_locked for interop test: Disconnection with concurrent splice_locked")
+            peer ! Peer.Disconnect(remoteNodeId)
+            stay()
+          } else
+            stay() using d.copy(commitments = commitments1) storing() sending spliceLocked_opt.toSeq ++ localAnnSigs_opt.toSeq
         case Left(_) => stay()
       }
 
@@ -2319,6 +2383,26 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
         myCurrentPerCommitmentPoint = myCurrentPerCommitmentPoint,
         tlvStream = TlvStream(rbfTlv ++ lastFundingLockedTlvs)
       )
+      d match {
+        case d: DATA_WAIT_FOR_DUAL_FUNDING_CONFIRMED => d.status match {
+          case DualFundingStatus.RbfWaitingForSigs(status) => log.debug(s"d.status={}, d.commitments.remoteCommitIndex={}, d.status.fundingTx.txId={}", status, d.commitments.remoteCommitIndex, status.fundingTx.txId)
+          case _ => d.latestFundingTx.sharedTx match {
+            case _: InteractiveTxBuilder.PartiallySignedSharedTransaction => log.debug(s"d.status={}, d.commitments.remoteCommitIndex={}, (partially signed) d.commitments.latest.fundingTxId={}", d.status, d.commitments.remoteCommitIndex, d.commitments.latest.fundingTxId)
+            case _: InteractiveTxBuilder.FullySignedSharedTransaction => log.debug(s"d.status={}, d.commitments.remoteCommitIndex={}, (fully signed) d.commitments.latest.fundingTxId={}", d.status, d.commitments.remoteCommitIndex, d.commitments.latest.fundingTxId)
+          }
+        }
+        case d: DATA_NORMAL => d.spliceStatus match {
+          case SpliceStatus.SpliceWaitingForSigs(status) => log.debug(s"d.spliceStatus={}, d.commitments.remoteCommitIndex={}, d.spliceStatus.fundingTx.txId={}", status, d.commitments.remoteCommitIndex, status.fundingTx.txId)
+          case _ => d.commitments.latest.localFundingStatus match {
+            case status: LocalFundingStatus.DualFundedUnconfirmedFundingTx =>
+              log.debug(s"localFundingStatus={}, d.commitments.remoteCommitIndex={}, localFundingStatus.sharedTx.txId={}", status, d.commitments.remoteCommitIndex, status.sharedTx.txId)
+            case status => log.debug(s"localFundingStatus={}, d.commitments.remoteCommitIndex={}, next_funding_txid=None", status, d.commitments.remoteCommitIndex)
+          }
+        }
+        case _ => ()
+      }
+      log.debug(s"our channel_reestablish: next_funding_tx_id={}, your_last_funding_locked={}, my_current_funding_Locked={}, next_local_commit_number={}", channelReestablish.nextFundingTxId_opt, channelReestablish.yourLastFundingLocked_opt, channelReestablish.myCurrentFundingLocked_opt, channelReestablish.nextLocalCommitmentNumber)
+
       // we update local/remote connection-local global/local features, we don't persist it right now
       val d1 = Helpers.updateFeatures(d, localInit, remoteInit)
       goto(SYNCING) using d1 sending channelReestablish
@@ -2445,7 +2529,11 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
               // will also send announcement_signatures.
               val notAnnouncedYet = d.commitments.announceChannel && c.shortChannelId_opt.nonEmpty && d.lastAnnouncement_opt.isEmpty
               if (notAnnouncedYet || notReceivedByRemote || notReceivedByRemoteLegacy) {
-                log.debug("re-sending channel_ready")
+                log.debug(s"re-sending channel_ready: {}", Seq(
+                  if (notAnnouncedYet) "not announced yet" else "",
+                  if (notReceivedByRemote) "not received by remote" else "",
+                  if (notReceivedByRemoteLegacy) "not received by remote (legacy)" else ""
+                ).filter(_.nonEmpty).mkString(", "))
                 val channelKeyPath = keyManager.keyPath(d.commitments.params.localParams, d.commitments.params.channelConfig)
                 val nextPerCommitmentPoint = keyManager.commitmentPoint(channelKeyPath, 1)
                 sendQueue = sendQueue :+ ChannelReady(d.commitments.channelId, nextPerCommitmentPoint)
@@ -2461,6 +2549,9 @@ class Channel(val nodeParams: NodeParams, val wallet: OnChainChannelFunder with 
                 })
               }
           }
+          log.debug(s"their channel_reestablish: next_funding_tx_id={}, your_last_funding_locked={}, my_current_funding_Locked={}, next_local_commit_number={}", channelReestablish.nextFundingTxId_opt, channelReestablish.yourLastFundingLocked_opt, channelReestablish.myCurrentFundingLocked_opt, channelReestablish.nextLocalCommitmentNumber)
+          log.debug(s"d.spliceStatus={}, d.commitments.remoteCommitIndex={}, d.commitments.latest.fundingTxId={}", d.spliceStatus, d.commitments.remoteCommitIndex, d.commitments.latest.fundingTxId)
+          reconnectCount += 1
 
           // resume splice signing session if any
           val spliceStatus1 = channelReestablish.nextFundingTxId_opt match {
