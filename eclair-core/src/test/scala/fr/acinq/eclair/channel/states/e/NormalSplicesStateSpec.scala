@@ -3525,6 +3525,8 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     //   |<---- tx_signatures ---|
     //   |----- tx_signatures -->|
 
+    val fundingTxId = alice.stateData.asInstanceOf[DATA_NORMAL].commitments.active.head.fundingTxId
+    val fundingTxRemoteSig = alice.stateData.asInstanceOf[DATA_NORMAL].commitments.active.head.localCommit.commitTxAndRemoteSig.remoteSig.asInstanceOf[RemoteSignature.FullSignature].sig
     val sender = TestProbe()
     alice ! CMD_SPLICE(sender.ref, Some(SpliceIn(15_002 sat)), None, None)
     exchangeStfu(alice, bob, alice2bob, bob2alice)
@@ -3551,13 +3553,14 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     alice2bob.expectMsgType[TxComplete]
     alice2bob.forward(bob)
     //alice2bob.expectMsgType[CommitSig]
-    bob2alice.expectMsgType[CommitSig]
+    val bobCommitSig = bob2alice.expectMsgType[CommitSig]
     bob2alice.forward(alice)
     awaitCond(alice.stateData.asInstanceOf[DATA_NORMAL].spliceStatus.isInstanceOf[SpliceStatus.SpliceWaitingForSigs])
 
     // Bob does not receive Alice's commit_sig before disconnecting.
     disconnect(f)
-    reconnect(f)
+    val (channelReestablishAlice, channelReestablishBob) = reconnect(f)
+    val spliceTxId = channelReestablishAlice.nextFundingTxId_opt.get
 
     // Alice will send their commit_sig.
     alice2bob.expectMsgType[CommitSig]
@@ -3570,6 +3573,12 @@ class NormalSplicesStateSpec extends TestKitBaseClass with FixtureAnyFunSuiteLik
     alice2bob.expectMsgType[TxSignatures]
     alice2bob.forward(bob)
     bob2alice.expectNoMessage(100 millis)
+
+    // simulate CLN sending redundant commit_sig messages, the first one for the spent funding tx
+    bob2alice.forward(alice, SpliceLocked(bobCommitSig.channelId, fundingTxId, TlvStream.empty))
+    bob2alice.forward(alice, CommitSig(bobCommitSig.channelId, fundingTxRemoteSig, Nil, TlvStream(CommitSigTlv.BatchTlv(2, fundingTxId), CommitSigTlv.ExperimentalBatchTlv(2))))
+    bob2alice.forward(alice, bobCommitSig.copy(tlvStream = TlvStream(CommitSigTlv.BatchTlv(2, spliceTxId), CommitSigTlv.ExperimentalBatchTlv(2))))
+    alice2bob.expectNoMessage(100 millis)
   }
 
   test("Disconnection with one side sending tx_signatures") { f =>

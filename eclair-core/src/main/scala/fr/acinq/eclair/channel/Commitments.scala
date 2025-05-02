@@ -622,6 +622,7 @@ case class Commitment(fundingTxIndex: Long,
     // remote commitment will include all local proposed changes + remote acked changes
     val spec = CommitmentSpec.reduce(remoteCommit.spec, changes.remoteChanges.acked, changes.localChanges.proposed)
     val (remoteCommitTx, htlcTxs) = Commitment.makeRemoteTxs(keyManager, params.channelConfig, params.channelFeatures, remoteCommit.index + 1, params.localParams, params.remoteParams, fundingTxIndex, remoteFundingPubKey, commitInput, remoteNextPerCommitmentPoint, spec)
+    log.debug("interop testing: commitsig txid={}, remoteCommitTx={} ", remoteCommitTx.tx.txid, remoteCommitTx.tx)
     val sig = keyManager.sign(remoteCommitTx, keyManager.fundingPublicKey(params.localParams.fundingKeyPath, fundingTxIndex), TxOwner.Remote, params.commitmentFormat, Map.empty)
 
     val sortedHtlcTxs: Seq[TransactionWithInputInfo] = htlcTxs.sortBy(_.input.outPoint.index)
@@ -1168,8 +1169,17 @@ case class Commitments(params: ChannelParams,
 
   /** This function should be used to ignore a commit_sig that we've already received. */
   def ignoreRetransmittedCommitSig(commitSig: CommitSig): Boolean = {
-    val RemoteSignature.FullSignature(latestRemoteSig) = latest.localCommit.commitTxAndRemoteSig.remoteSig
-    params.channelFeatures.hasFeature(Features.DualFunding) && commitSig.batchSize == 1 && latestRemoteSig == commitSig.signature
+    val commit = commitSig.fundingTxId_opt match {
+      case None => Some(active.head)
+      case Some(fundingTxId) => active.find(_.fundingTxId == fundingTxId)
+    }
+    commit match {
+      case Some(commit) =>
+        val fullCommitment = FullCommitment(params, changes, commit.fundingTxIndex, commit.firstRemoteCommitIndex, commit.remoteFundingPubKey, commit.localFundingStatus, commit.remoteFundingStatus, commit.localCommit, commit.remoteCommit, commit.nextRemoteCommit_opt)
+        val RemoteSignature.FullSignature(latestRemoteSig) = fullCommitment.localCommit.commitTxAndRemoteSig.remoteSig
+        params.channelFeatures.hasFeature(Features.DualFunding) && latestRemoteSig == commitSig.signature
+      case None => false
+    }
   }
 
   def localFundingSigs(fundingTxId: TxId): Option[TxSignatures] = {
