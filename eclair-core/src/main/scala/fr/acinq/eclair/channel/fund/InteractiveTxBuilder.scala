@@ -526,6 +526,10 @@ private class InteractiveTxBuilder(replyTo: ActorRef[InteractiveTxBuilder.Respon
         replyTo ! SendMessage(sessionId, message)
         val next = session.copy(toSend = tail, localOutputs = session.localOutputs :+ addOutput, txCompleteSent = false)
         receive(next)
+      case Nil if session.copy(txCompleteSent = true).isComplete && fundingParams.localContribution == 15001.sat =>
+        log.debug("Not sending final tx_complete for interop test: Disconnection with one side sending commit_sig")
+        val next = session.copy(txCompleteSent = true)
+        validateAndSign(next)
       case Nil =>
         replyTo ! SendMessage(sessionId, TxComplete(fundingParams.channelId))
         val next = session.copy(txCompleteSent = true)
